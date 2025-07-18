@@ -162,259 +162,569 @@ Below are the complete source code files for the Google Apps Script project.
 ```javascript
 /**
  * @OnlyCurrentDoc
- * This script creates consolidated Amazon dashboards from three source reports,
- * now supporting distinct sheets for All, Active, and Inactive listings.
- * VERSION 10: Supports separate output tabs for different report types.
+ * This script creates consolidated Amazon dashboards and a professional analysis tab.
+ * VERSION 14.1: Refined for enhanced error handling and robustness.
+ * - Refined the global error handler to safely operate in any execution context (UI or background).
+ * - Made the showSidebar function more resilient by ensuring a UI instance is always available.
+ * - Maintained existing performance, robustness, and maintainability enhancements.
  */
 
 // --- CONFIGURATION --- //
-// Central configuration for all sheet names and column headers.
-// If Amazon changes a report column name, you only need to update it here.
 const CONFIG = {
   sheets: {
     listing: 'All_Listing_Report',
     inventory: 'FBA_Inventory_Snapshot',
-    sales: 'FBA_Shipments_60_Days', // This is your All Orders Report
-    keepa: 'Keepa',                  // New: Keepa sheet
-    dashboard: 'Dashboard',          // Main dashboard for 'All' listings
-    activeListings: 'Active_Listing',  // New: Sheet for Active listings
-    inactiveListings: 'Inactive_Listing' // New: Sheet for Inactive listings
+    sales: 'FBA_Shipments_60_Days',
+    keepa: 'Keepa',
+    dashboard: 'Dashboard',
+    activeListings: 'Active_Listing',
+    inactiveListings: 'Inactive_Listing',
+    analysis: 'Analysis',
+    chartData: '_AnalysisChartData' // Hidden sheet for chart source data
   },
   headers: {
-    listingSku: 'seller-sku', // SKU header used in All_Listing_Report
-    salesSku: 'sku',         // SKU header used in FBA_Shipments_60_Days (as per your feedback)
-    invSku: 'sku',           // Specific SKU header for FBA_Inventory_Snapshot (already 'sku')
-    asin: 'asin1',
-    itemName: 'item-name',
-    status: 'status',
-    available: 'available',
-    daysOfSupply: 'days-of-supply',
-    unfulfillable: 'unfulfillable-quantity',
-    reservedCustomer: 'Reserved Customer Order',
-    reservedTransfer: 'Reserved FC Transfer',
-    reservedProcessing: 'Reserved FC Processing',
-    purchaseDate: 'purchase-date',
-    quantity: 'quantity',
-    // Keepa specific headers
-    keepaAsin: 'ASIN',
-    keepaImage: 'Image'
+    listingSku: 'seller-sku', salesSku: 'sku', invSku: 'sku', asin: 'asin1',
+    itemName: 'item-name', status: 'status', available: 'available',
+    daysOfSupply: 'days-of-supply', unfulfillable: 'unfulfillable-quantity',
+    reservedCustomer: 'Reserved Customer Order', reservedTransfer: 'Reserved FC Transfer',
+    reservedProcessing: 'Reserved FC Processing', purchaseDate: 'purchase-date',
+    quantity: 'quantity', itemPrice: 'item-price', orderId: 'amazon-order-id',
+    keepaAsin: 'ASIN', keepaImage: 'Image'
   },
-  image: {
-    width: 100 // Width of the image column in pixels
-  },
-  // Define exact strings for listing statuses from your reports
-  listingStatus: {
-    active: 'Active',   // Confirm this exact string from your 'status' column
-    inactive: 'Inactive' // Confirm this exact string from your 'status' column
-  }
+  image: { width: 100 },
+  listingStatus: { active: 'Active', inactive: 'Inactive' },
+  chartLimits: { topNProducts: 10 }
 };
 // --- END CONFIGURATION ---
 
+// --- UI & INITIALIZATION --- //
+
 /**
- * Creates a custom menu and opens the sidebar when the spreadsheet is opened.
+ * Adds a custom menu to the spreadsheet UI when the file is opened.
+ * Also displays the HTML sidebar.
  */
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Dashboard Tools')
-    .addItem('Open Dashboard Controls', 'showSidebar') // Emphasize sidebar as primary control
-    .addToUi();
-  showSidebar(); // Automatically open the sidebar for the user
+  const ui = SpreadsheetApp.getUi(); // Get UI once here
+  try {
+    ui.createMenu('Dashboard Tools')
+      .addItem('Open Dashboard Controls', 'showSidebar')
+      .addToUi();
+    showSidebar(ui); // Pass UI instance to avoid an extra API call
+  } catch (e) {
+    _handleError(e, ui, 'onOpen');
+  }
 }
 
+// --- REFINEMENT ---
+// The `showSidebar` function has been updated to be more robust. It now ensures a UI 
+// instance exists, whether it's passed in as an argument or fetched directly. This prevents
+// errors if the function is ever called from a context that doesn't provide the `ui` object.
 /**
- * Shows the custom HTML sidebar.
+ * Displays the HTML sidebar for user interaction.
+ * @param {GoogleAppsScript.Spreadsheet.Ui} [ui] The spreadsheet UI instance (optional).
  */
-function showSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
-    .setTitle('Dashboard Controls')
-    .setWidth(300);
-  SpreadsheetApp.getUi().showSidebar(html);
+function showSidebar(ui) {
+  const effectiveUi = ui || SpreadsheetApp.getUi();
+  try {
+    const html = HtmlService.createHtmlOutputFromFile('Sidebar')
+      .setTitle('Dashboard Controls')
+      .setWidth(300);
+    effectiveUi.showSidebar(html);
+  } catch (e) {
+    _handleError(e, effectiveUi, 'showSidebar');
+  }
 }
 
+// --- MAIN ROUTER FUNCTION --- //
+
 /**
- * Wrapper function called by the sidebar to dispatch to the correct report generator.
- * This acts as the entry point for sidebar interactions.
- * @param {string} contextString - The optional context string provided by the user.
- * @param {string} reportType - The type of report to generate ('all', 'inactive', 'active').
+ * Main router function called from the sidebar. It directs traffic to the correct report generator.
+ * @param {string} contextString User-provided context for the report.
+ * @param {string} reportType The type of report to generate ('all', 'inactive', 'active', 'analysis').
+ * @returns {string} A success message to be displayed in the sidebar alert.
  */
 function createConsolidatedDashboardFromSidebar(contextString, reportType) {
-  const ui = SpreadsheetApp.getUi();
-  try {
-    if (reportType === 'all') {
-      generateAllListingsDashboard(contextString);
-    } else if (reportType === 'inactive') {
-      generateInactiveListingsDashboard(contextString);
-    } else if (reportType === 'active') {
-      generateActiveListingsDashboard(contextString);
-    } else {
-      throw new Error('Invalid report type specified. Please select "all", "inactive", or "active".');
-    }
-  } catch (e) {
-    ui.alert('Generation Error', e.message, ui.ButtonSet.OK);
-  }
-}
-
-/**
- * Generates the 'All Listings' dashboard on the 'Dashboard' tab.
- * @param {string} contextString - An optional string to add as context.
- */
-function generateAllListingsDashboard(contextString = '') {
-  _generateDashboardReport(contextString, 'all', CONFIG.sheets.dashboard);
-}
-
-/**
- * Generates the 'Inactive Listings' dashboard on the 'Inactive_Listing' tab.
- * @param {string} contextString - An optional string to add as context.
- */
-function generateInactiveListingsDashboard(contextString = '') {
-  _generateDashboardReport(contextString, 'inactive', CONFIG.sheets.inactiveListings);
-}
-
-/**
- * Generates the 'Active Listings' dashboard on the 'Active_Listing' tab.
- * @param {string} contextString - An optional string to add as context.
- */
-function generateActiveListingsDashboard(contextString = '') {
-  _generateDashboardReport(contextString, 'active', CONFIG.sheets.activeListings);
-}
-
-
-/**
- * Core function to create a consolidated dashboard based on specified report type and target sheet.
- * This version correctly generates image formulas using Keepa data and adds a direct link to the Amazon page,
- * and now supports filtering and sorting based on report type, writing to a specified sheet.
- * @param {string} [contextString=''] - An optional string to add as context to the dashboard.
- * @param {string} [reportType='all'] - The type of report to generate ('all', 'inactive', 'active').
- * @param {string} targetSheetName - The name of the sheet where the report will be written.
- */
-function _generateDashboardReport(contextString = '', reportType = 'all', targetSheetName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
+  try {
+    // The switch statement is a clean way to route execution.
+    switch (reportType) {
+      case 'all':
+        return generateAllListingsDashboard(ss, ui, contextString);
+      case 'inactive':
+        return generateInactiveListingsDashboard(ss, ui, contextString);
+      case 'active':
+        return generateActiveListingsDashboard(ss, ui, contextString);
+      case 'analysis':
+        return generateAnalysisTab(ss, ui);
+      default:
+        throw new Error('Invalid report type specified.');
+    }
+  } catch (e) {
+    // All errors from child functions will be caught here.
+    _handleError(e, ui, `createConsolidatedDashboardFromSidebar`);
+    // Re-throw the error to ensure the .withFailureHandler() on the client-side catches it.
+    throw e;
+  }
+}
 
-  // --- 1. Get Source Sheets ---
-  const listingSheet = ss.getSheetByName(CONFIG.sheets.listing);
-  const inventorySheet = ss.getSheetByName(CONFIG.sheets.inventory);
-  const salesSheet = ss.getSheetByName(CONFIG.sheets.sales);
-  const keepaSheet = ss.getSheetByName(CONFIG.sheets.keepa);
+// --- DASHBOARD GENERATORS --- //
 
-  if (!listingSheet || !inventorySheet || !salesSheet || !keepaSheet) {
-    ui.alert('Error', `Please make sure all source sheets exist: ${CONFIG.sheets.listing}, ${CONFIG.sheets.inventory}, ${CONFIG.sheets.sales}, ${CONFIG.sheets.keepa}`, ui.ButtonSet.OK);
+/**
+ * Generates the 'All_Listing_Report' dashboard.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
+ * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
+ * @param {string} c User-provided context string.
+ * @returns {string} Success message.
+ */
+function generateAllListingsDashboard(ss, ui, c) {
+  return _generateDashboardReport(ss, ui, c, 'all', CONFIG.sheets.dashboard);
+}
+
+/**
+ * Generates the 'Inactive_Listing' dashboard.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
+ * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
+ * @param {string} c User-provided context string.
+ * @returns {string} Success message.
+ */
+function generateInactiveListingsDashboard(ss, ui, c) {
+  return _generateDashboardReport(ss, ui, c, 'inactive', CONFIG.sheets.inactiveListings);
+}
+
+/**
+ * Generates the 'Active_Listing' dashboard.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
+ * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
+ * @param {string} c User-provided context string.
+ * @returns {string} Success message.
+ */
+function generateActiveListingsDashboard(ss, ui, c) {
+  return _generateDashboardReport(ss, ui, c, 'active', CONFIG.sheets.activeListings);
+}
+
+/**
+ * Generates the professional 'Analysis' tab with KPIs and charts.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
+ * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
+ * @returns {string} Success message.
+ */
+function generateAnalysisTab(ss, ui) {
+  let analysisSheet = ss.getSheetByName(CONFIG.sheets.analysis);
+  if (analysisSheet) {
+    const charts = analysisSheet.getCharts();
+    charts.forEach(chart => analysisSheet.removeChart(chart));
+    analysisSheet.clear();
+  } else {
+    analysisSheet = ss.insertSheet(CONFIG.sheets.analysis);
+  }
+
+  let chartDataSheet = ss.getSheetByName(CONFIG.sheets.chartData);
+  if (chartDataSheet) {
+    chartDataSheet.clear();
+  } else {
+    chartDataSheet = ss.insertSheet(CONFIG.sheets.chartData);
+    chartDataSheet.hideSheet();
+  }
+
+  const salesDataObject = _getValidatedData(ss, CONFIG.sheets.sales, [CONFIG.headers.purchaseDate, CONFIG.headers.quantity, CONFIG.headers.itemPrice, CONFIG.headers.orderId, CONFIG.headers.salesSku]);
+  const listingDataObject = _getValidatedData(ss, CONFIG.sheets.listing, [CONFIG.headers.listingSku, CONFIG.headers.itemName]);
+
+  const weeklySales = _processWeeklySalesData(salesDataObject);
+  const marketShareData = _processMarketShareData(salesDataObject, listingDataObject);
+  const topNSalesData = _processTopNSalesData(salesDataObject, listingDataObject);
+
+  _createProfessionalLayout(analysisSheet, weeklySales);
+  _createSalesTrendChart(analysisSheet, chartDataSheet, weeklySales);
+  _createMarketShareChart(analysisSheet, chartDataSheet, marketShareData);
+  _createTopNSalesChart(analysisSheet, chartDataSheet, topNSalesData);
+
+  analysisSheet.setColumnWidths(1, 12, 110).setFrozenRows(1);
+  ss.setActiveSheet(analysisSheet);
+
+  return `The professional "${CONFIG.sheets.analysis}" tab has been generated.`;
+}
+
+// --- ANALYSIS TAB HELPERS --- //
+
+/**
+ * Creates the formatted layout with KPI cards and titles.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target sheet.
+ * @param {object} sales Processed weekly sales data including KPIs.
+ */
+function _createProfessionalLayout(sheet, sales) {
+  sheet.getRange('A1:L1').merge().setValue('Amazon Sales Performance Dashboard').setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sheet.getRange('A1:L1').setBackground('#2c3e50').setFontColor('white');
+
+  const now = new Date();
+  sheet.getRange('A2').setValue(`Last Updated: ${now.toLocaleString()}`).setFontSize(9).setFontColor('#7f8c8d');
+  sheet.getRange('A2:L2').merge().setHorizontalAlignment('right');
+
+  sheet.getRange('B4:E4').merge().setValue('Key Performance Indicators (Last 7 Days)').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('B4:E11').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
+
+  const kpiLabels = ['Total Sales Revenue:', 'Total Units Sold:', 'Total Orders:', 'Average Order Value:', 'Average Units Per Order:'];
+  const kpiValues = [sales.weekTotalSales, sales.weekTotalUnits, sales.weekTotalOrders, sales.avgOrderValue, sales.avgUnitsPerOrder];
+  const kpiStartRow = 6;
+  kpiLabels.forEach((label, i) => {
+    sheet.getRange(`C${kpiStartRow + i}`).setValue(label).setFontWeight('bold').setHorizontalAlignment('right');
+    sheet.getRange(`D${kpiStartRow + i}`).setValue(kpiValues[i]).setFontSize(14).setFontWeight('bold').setHorizontalAlignment('right');
+  });
+
+  sheet.getRange(`D${kpiStartRow}`).setNumberFormat('$#,##0.00');
+  sheet.getRange(`D${kpiStartRow + 1}`).setNumberFormat('#,##0');
+  sheet.getRange(`D${kpiStartRow + 2}`).setNumberFormat('#,##0');
+  sheet.getRange(`D${kpiStartRow + 3}`).setNumberFormat('$#,##0.00');
+  sheet.getRange(`D${kpiStartRow + 4}`).setNumberFormat('#,##0.00');
+
+  sheet.getRange('F4:L4').merge().setValue('Daily Sales Trend (Last 7 Days)').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('F4:L16').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
+
+  sheet.getRange('B18:E18').merge().setValue('Product Market Share (by Sales Revenue)').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('B18:E36').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
+
+  sheet.getRange('F18:L18').merge().setValue(`Top ${CONFIG.chartLimits.topNProducts} Selling Products (Last 60 Days)`).setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('F18:L36').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
+
+  sheet.getRange('A1:L36').setVerticalAlignment('middle');
+  sheet.getRange('B4:L36').setFontSize(10);
+}
+
+/**
+ * Creates and inserts the daily sales trend line chart.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target display sheet.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dataSheet The sheet to store chart data.
+ * @param {object} sales Processed weekly sales data.
+ */
+function _createSalesTrendChart(sheet, dataSheet, sales) {
+  const chartData = [['Date', 'Units Ordered', 'Ordered Product Sales']];
+  const sortedDates = Object.keys(sales.daily).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+  sortedDates.forEach(date => {
+    const data = sales.daily[date];
+    chartData.push([new Date(date), data.units, data.sales]);
+  });
+
+  if (chartData.length < 2) {
+    sheet.getRange('F5').setValue('Not enough sales trend data to generate chart.').setFontStyle('italic').setHorizontalAlignment('center');
+    sheet.getRange('F5:L5').merge();
     return;
   }
 
-  // --- 2. Get and Validate Data ---
-  const listingData = listingSheet.getDataRange().getValues();
-  const inventoryData = inventorySheet.getDataRange().getValues();
-  const salesData = salesSheet.getDataRange().getValues();
-  const keepaData = keepaSheet.getDataRange().getValues();
+  const chartDataRange = dataSheet.getRange(1, 1, chartData.length, chartData[0].length);
+  chartDataRange.setValues(chartData);
 
-  // Helper function to find missing headers
-  const findMissingHeaders = (actualHeaders, requiredHeaders) => {
-    const headerSet = new Set(actualHeaders);
-    return requiredHeaders.filter(h => !headerSet.has(h));
-  };
+  const lineChart = sheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(chartDataRange)
+    .setPosition(5, 6, 0, 0)
+    .setOption('title', null)
+    .setOption('legend', { position: 'top', textStyle: { fontSize: 10 } })
+    .setOption('hAxis', { title: 'Date', format: 'M/d', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 } })
+    .setOption('vAxes', {
+      0: { title: 'Units Ordered', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 }, format: '#,##0' },
+      1: { title: 'Product Sales', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 }, format: '$#,##0.00' }
+    })
+    .setOption('series', {
+      0: { targetAxisIndex: 0, color: '#3498db', type: 'bars' },
+      1: { targetAxisIndex: 1, color: '#e74c3c', type: 'line', lineWidth: 2, pointSize: 4 }
+    })
+    .setOption('chartArea', { left: '15%', top: '15%', width: '70%', height: '70%' })
+    .setOption('focusTarget', 'category')
+    .build();
 
-  // Validate Listing Sheet Headers
-  const listingHeaders = listingData[0];
-  let missingListingHeaders = findMissingHeaders(listingHeaders, [CONFIG.headers.listingSku, CONFIG.headers.asin, CONFIG.headers.itemName, CONFIG.headers.status]);
-  if (missingListingHeaders.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.listing}": ${missingListingHeaders.join(', ')}`, ui.ButtonSet.OK);
+  sheet.insertChart(lineChart);
+}
+
+/**
+ * Creates and inserts the product market share treemap chart.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target display sheet.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dataSheet The sheet to store chart data.
+ * @param {Array<Array<any>>} marketShareData Processed market share data.
+ */
+function _createMarketShareChart(sheet, dataSheet, marketShareData) {
+  if (marketShareData.length < 3) {
+    sheet.getRange('B19').setValue('Not enough sales data to generate market share chart.').setFontStyle('italic').setHorizontalAlignment('center');
+    sheet.getRange('B19:E19').merge();
     return;
   }
 
-  // --- 3. Process Data into Maps ---
-  const inventoryMap = processInventory(inventoryData, ui);
-  if (!inventoryMap) return;
-  const salesMap = processSales(salesData, ui);
-  if (!salesMap) return;
-  const keepaMap = processKeepa(keepaData, ui);
-  if (!keepaMap) return;
+  const chartDataRange = dataSheet.getRange(1, 6, marketShareData.length, marketShareData[0].length);
+  chartDataRange.setValues(marketShareData);
 
-  // Get column indexes from Listing Report
+  const treemapChart = sheet.newChart()
+    .setChartType(Charts.ChartType.TREEMAP)
+    .addRange(chartDataRange)
+    .setPosition(19, 2, 0, 0)
+    .setOption('title', null)
+    .setOption('minColor', '#e6f4ea')
+    .setOption('midColor', '#87c5a4')
+    .setOption('maxColor', '#225c4e')
+    .setOption('headerHeight', 15)
+    .setOption('fontColor', 'black')
+    .setOption('showScale', true)
+    .setOption('generateTooltip', true)
+    .setOption('chartArea', { left: '5%', top: '10%', width: '90%', height: '85%' })
+    .build();
+
+  sheet.insertChart(treemapChart);
+}
+
+/**
+ * Creates and inserts the top N selling products bar chart.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target display sheet.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dataSheet The sheet to store chart data.
+ * @param {Array<Array<any>>} topNSalesData Processed top N sales data.
+ */
+function _createTopNSalesChart(sheet, dataSheet, topNSalesData) {
+  if (topNSalesData.length < 2) {
+    sheet.getRange('F19').setValue(`Not enough sales data to generate top ${CONFIG.chartLimits.topNProducts} products chart.`).setFontStyle('italic').setHorizontalAlignment('center');
+    sheet.getRange('F19:L19').merge();
+    return;
+  }
+
+  const chartDataRange = dataSheet.getRange(1, 10, topNSalesData.length, topNSalesData[0].length);
+  chartDataRange.setValues(topNSalesData);
+
+  const barChart = sheet.newChart()
+    .setChartType(Charts.ChartType.BAR)
+    .addRange(chartDataRange)
+    .setPosition(19, 6, 0, 0)
+    .setOption('title', null)
+    .setOption('legend', { position: 'none' })
+    .setOption('hAxis', { title: 'Sales Revenue', format: '$#,##0.00', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 } })
+    .setOption('vAxis', { title: 'Product Name', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 } })
+    .setOption('series', { 0: { color: '#2ecc71' } })
+    .setOption('chartArea', { left: '25%', top: '10%', width: '70%', height: '80%' })
+    .build();
+
+  sheet.insertChart(barChart);
+}
+
+/**
+ * Processes sales data for weekly trends and KPIs.
+ * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
+ * @returns {object} Processed sales data including KPIs.
+ */
+function _processWeeklySalesData(salesDataObject) {
+  const { headers, data } = salesDataObject;
+  const dateIdx = headers.indexOf(CONFIG.headers.purchaseDate);
+  const qtyIdx = headers.indexOf(CONFIG.headers.quantity);
+  const priceIdx = headers.indexOf(CONFIG.headers.itemPrice);
+  const orderIdIdx = headers.indexOf(CONFIG.headers.orderId);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const sevenDaysAgo = new Date(today);
+  sevenDaysAgo.setDate(today.getDate() - 7);
+
+  const weeklyData = {};
+  const weeklyOrderIds = new Set();
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    weeklyData[d.toLocaleDateString()] = { units: 0, sales: 0 };
+  }
+
+  data.forEach(row => {
+    const purchaseDate = new Date(row[dateIdx]);
+    if (!isNaN(purchaseDate.getTime()) && purchaseDate >= sevenDaysAgo && purchaseDate <= today) {
+      const key = purchaseDate.toLocaleDateString();
+      if (key in weeklyData) {
+        const quantity = parseFloat(row[qtyIdx]) || 0;
+        const price = parseFloat(row[priceIdx]) || 0;
+        weeklyData[key].units += quantity;
+        weeklyData[key].sales += quantity * price;
+        weeklyOrderIds.add(row[orderIdIdx]);
+      }
+    }
+  });
+
+  const weekTotalOrders = weeklyOrderIds.size;
+  const weekTotalUnits = Object.values(weeklyData).reduce((sum, day) => sum + day.units, 0);
+  const weekTotalSales = Object.values(weeklyData).reduce((sum, day) => sum + day.sales, 0);
+  const avgOrderValue = weekTotalOrders > 0 ? (weekTotalSales / weekTotalOrders) : 0;
+  const avgUnitsPerOrder = weekTotalOrders > 0 ? (weekTotalUnits / weekTotalOrders) : 0;
+
+  return { daily: weeklyData, weekTotalOrders, weekTotalUnits, weekTotalSales, avgOrderValue, avgUnitsPerOrder };
+}
+
+/**
+ * Helper to process market share data (for Treemap chart).
+ * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
+ * @param {{headers: string[], data: any[][]}} listingDataObject The validated listing data object.
+ * @returns {Array<Array<any>>} Formatted data for treemap chart.
+ */
+function _processMarketShareData(salesDataObject, listingDataObject) {
+  const { headers: salesHeaders, data: salesData } = salesDataObject;
+  const salesSkuIdx = salesHeaders.indexOf(CONFIG.headers.salesSku);
+  const salesQtyIdx = salesHeaders.indexOf(CONFIG.headers.quantity);
+  const salesPriceIdx = salesHeaders.indexOf(CONFIG.headers.itemPrice);
+
+  const salesBySku = {};
+  salesData.forEach(row => {
+    const sku = String(row[salesSkuIdx] || '').trim();
+    if (sku) {
+      const quantity = parseFloat(row[salesQtyIdx]) || 0;
+      const price = parseFloat(row[salesPriceIdx]) || 0;
+      salesBySku[sku] = (salesBySku[sku] || 0) + (quantity * price);
+    }
+  });
+
+  const skuToNameMap = {};
+  if (listingDataObject && listingDataObject.data.length > 0) {
+    const { headers: listingHeaders, data: listingData } = listingDataObject;
+    const listingSkuIdx = listingHeaders.indexOf(CONFIG.headers.listingSku);
+    const listingNameIdx = listingHeaders.indexOf(CONFIG.headers.itemName);
+    listingData.forEach(row => {
+      const sku = String(row[listingSkuIdx] || '').trim();
+      const name = String(row[listingNameIdx] || '').trim();
+      if (sku && name) skuToNameMap[sku] = name;
+    });
+  } else {
+    Logger.log(`Warning: Listing report sheet "${CONFIG.sheets.listing}" is empty or has no data, using SKUs for product names.`);
+  }
+
+  const treemapData = [['Product', 'Parent', 'Sales Revenue']];
+  treemapData.push(['All Products', null, 0]);
+
+  for (const [sku, totalRevenue] of Object.entries(salesBySku)) {
+    if (totalRevenue > 0) {
+      treemapData.push([skuToNameMap[sku] || sku, 'All Products', totalRevenue]);
+    }
+  }
+  return treemapData;
+}
+
+/**
+ * Helper to process sales data for top N selling products.
+ * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
+ * @param {{headers: string[], data: any[][]}} listingDataObject The validated listing data object.
+ * @returns {Array<Array<any>>} Formatted data for bar chart.
+ */
+function _processTopNSalesData(salesDataObject, listingDataObject) {
+  const { headers: salesHeaders, data: salesData } = salesDataObject;
+  const salesSkuIdx = salesHeaders.indexOf(CONFIG.headers.salesSku);
+  const salesQtyIdx = salesHeaders.indexOf(CONFIG.headers.quantity);
+  const salesPriceIdx = salesHeaders.indexOf(CONFIG.headers.itemPrice);
+  const salesDateIdx = salesHeaders.indexOf(CONFIG.headers.purchaseDate);
+
+  const salesBySku = {};
+  const sixtyDaysAgo = new Date();
+  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+  sixtyDaysAgo.setHours(0, 0, 0, 0);
+
+  salesData.forEach(row => {
+    const purchaseDate = new Date(row[salesDateIdx]);
+    if (!isNaN(purchaseDate.getTime()) && purchaseDate >= sixtyDaysAgo) {
+      const sku = String(row[salesSkuIdx] || '').trim();
+      if (sku) {
+        const quantity = parseFloat(row[salesQtyIdx]) || 0;
+        const price = parseFloat(row[salesPriceIdx]) || 0;
+        salesBySku[sku] = (salesBySku[sku] || 0) + (quantity * price);
+      }
+    }
+  });
+
+  const skuToNameMap = {};
+  if (listingDataObject && listingDataObject.data.length > 0) {
+    const { headers: listingHeaders, data: listingData } = listingDataObject;
+    const listingSkuIdx = listingHeaders.indexOf(CONFIG.headers.listingSku);
+    const listingNameIdx = listingHeaders.indexOf(CONFIG.headers.itemName);
+    listingData.forEach(row => {
+      const sku = String(row[listingSkuIdx] || '').trim();
+      const name = String(row[listingNameIdx] || '').trim();
+      if (sku && name) skuToNameMap[sku] = name;
+    });
+  }
+
+  const sortedProducts = Object.entries(salesBySku)
+    .map(([sku, revenue]) => ({ name: skuToNameMap[sku] || sku, revenue: revenue }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, CONFIG.chartLimits.topNProducts);
+
+  const chartData = [['Product', 'Sales Revenue']];
+  sortedProducts.forEach(p => chartData.push([p.name, p.revenue]));
+
+  return chartData;
+}
+
+// --- CORE DASHBOARD & HELPER FUNCTIONS --- //
+
+/**
+ * Generic function to generate a listings-based dashboard.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
+ * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
+ * @param {string} contextString User-provided context for the report.
+ * @param {string} reportType The type of report ('all', 'inactive', 'active').
+ * @param {string} targetSheetName The name of the sheet where the dashboard will be created.
+ * @returns {string} Success message.
+ */
+function _generateDashboardReport(ss, ui, contextString = '', reportType = 'all', targetSheetName) {
+  const listingDataObject = _getValidatedData(ss, CONFIG.sheets.listing, [CONFIG.headers.listingSku, CONFIG.headers.asin, CONFIG.headers.itemName, CONFIG.headers.status]);
+  const inventoryDataObject = _getValidatedData(ss, CONFIG.sheets.inventory, [CONFIG.headers.invSku, CONFIG.headers.available, CONFIG.headers.daysOfSupply, CONFIG.headers.unfulfillable, CONFIG.headers.reservedCustomer, CONFIG.headers.reservedTransfer, CONFIG.headers.reservedProcessing]);
+  const salesDataObject = _getValidatedData(ss, CONFIG.sheets.sales, [CONFIG.headers.salesSku, CONFIG.headers.purchaseDate, CONFIG.headers.quantity]);
+  const keepaDataObject = _getValidatedData(ss, CONFIG.sheets.keepa, [CONFIG.headers.keepaAsin, CONFIG.headers.keepaImage]);
+
+  const inventoryMap = processInventory(inventoryDataObject);
+  const salesMap = processSales(salesDataObject);
+  const keepaMap = processKeepa(keepaDataObject);
+
+  const { headers: listingHeaders, data: listingData } = listingDataObject;
   const skuListingIndex = listingHeaders.indexOf(CONFIG.headers.listingSku);
   const asinListingIndex = listingHeaders.indexOf(CONFIG.headers.asin);
   const nameListingIndex = listingHeaders.indexOf(CONFIG.headers.itemName);
   const statusListingIndex = listingHeaders.indexOf(CONFIG.headers.status);
 
-  // --- 4. Build ALL Dashboard Data (before filtering/sorting) ---
   const allDashboardData = [];
-  listingData.slice(1).forEach(row => { // Use slice(1) to skip header row
+  listingData.forEach(row => {
     const sku = row[skuListingIndex];
-    if (!sku) return; // Skip rows with no SKU
+    if (!sku) return;
 
     const inventory = inventoryMap[sku] || {};
     const sales = salesMap[sku] || {};
-
-    // --- Image Formula & Amazon Link Generation (Using Keepa Image) ---
     const asin = row[asinListingIndex];
-    let imageFormula = ""; // Default to blank if no ASIN or Keepa image
-    let amazonLink = "";   // Default link to blank
-
+    let imageFormula = "";
+    let amazonLink = "";
     if (asin) {
       const keepaImageUrl = keepaMap[asin];
-      // Use the Keepa image URL if available, otherwise a generic placeholder
       if (keepaImageUrl) {
-        imageFormula = `=IMAGE("${keepaImageUrl}")`;
+        imageFormula = `=IMAGE("${keepaImageUrl}", 4, ${CONFIG.image.width}, ${CONFIG.image.width / 1.2})`;
       } else {
-        // Fallback placeholder image if Keepa data doesn't have it
-        imageFormula = `=IMAGE("https://via.placeholder.com/${CONFIG.image.width}x${CONFIG.image.width/1.2}.png?text=No+Image")`;
+        imageFormula = `=IMAGE("https://via.placeholder.com/${CONFIG.image.width}x${CONFIG.image.width / 1.2}.png?text=No+Image", 4, ${CONFIG.image.width}, ${CONFIG.image.width / 1.2})`;
       }
-
-      // Create the direct product link using the ASIN
       amazonLink = `https://www.amazon.com/dp/${asin}`;
     }
 
     const pastMonthSales = sales.pastMonthSales || 0;
     const currentMonthSales = sales.currentMonthSales || 0;
-    const monthlyDifference = currentMonthSales - pastMonthSales;
 
     allDashboardData.push([
-      imageFormula, // Index 0
-      row[nameListingIndex] || 'N/A', // Index 1
-      asin || 'N/A', // Index 2
-      sku, // Index 3
-      amazonLink, // Index 4
-      row[statusListingIndex] || 'N/A', // Index 5: Listing Status
-      sales.yesterdaySales || 0, // Index 6
-      inventory.available || 0, // Index 7
-      inventory.daysOfSupply || 0, // Index 8: Days of Supply
-      inventory.reservedCustomerOrder || 0, // Index 9
-      inventory.reservedFcTransfer || 0, // Index 10
-      inventory.reservedFcProcessing || 0, // Index 11
-      inventory.unfulfillable || 0, // Index 12
-      pastMonthSales, // Index 13
-      currentMonthSales, // Index 14
-      monthlyDifference // Index 15
+      imageFormula, row[nameListingIndex] || 'N/A', asin || 'N/A', sku, amazonLink,
+      row[statusListingIndex] || 'N/A', sales.yesterdaySales || 0, inventory.available || 0,
+      inventory.daysOfSupply || 0, inventory.reservedCustomerOrder || 0,
+      inventory.reservedFcTransfer || 0, inventory.reservedFcProcessing || 0,
+      inventory.unfulfillable || 0, pastMonthSales, currentMonthSales, currentMonthSales - pastMonthSales
     ]);
   });
 
-  // --- 5. Apply Filtering and Sorting based on reportType ---
-  let finalDashboardData = [...allDashboardData]; // Start with all data
-  let reportTitle = "All Listings"; // Default title
+  let finalDashboardData = [...allDashboardData];
+  let reportTitle = "All Listings";
 
   if (reportType === 'inactive') {
     reportTitle = "Inactive Listings (FBA-SKU Filtered)";
     finalDashboardData = finalDashboardData.filter(row => {
-      const status = row[5]; // Index of 'Listing status'
-      const sku = String(row[3]);    // Index of 'SKU', ensure it's a string
+      const status = row[5];
+      const sku = String(row[3]);
       return status === CONFIG.listingStatus.inactive && sku.toUpperCase().startsWith('FBA-');
     });
   } else if (reportType === 'active') {
     reportTitle = "Active Listings (Sorted by Days of Supply)";
-    finalDashboardData = finalDashboardData.filter(row => {
-      const status = row[5]; // Index of 'Listing status'
-      return status === CONFIG.listingStatus.active;
-    });
-    // Sort active listings by 'Days of Supply' from lowest to highest
-    finalDashboardData.sort((a, b) => {
-      // Ensure numeric comparison; treat empty/invalid as Infinity for sorting to end
-      const daysA = parseFloat(a[8]) || Infinity;
-      const daysB = parseFloat(b[8]) || Infinity;
-      return daysA - daysB;
-    });
+    finalDashboardData = finalDashboardData.filter(row => row[5] === CONFIG.listingStatus.active);
+    finalDashboardData.sort((a, b) => (parseFloat(a[8]) || Infinity) - (parseFloat(b[8]) || Infinity));
   }
 
-  // --- 6. Write Data to Target Sheet ---
   let targetSheet = ss.getSheetByName(targetSheetName);
   if (targetSheet) {
     targetSheet.clear();
@@ -422,56 +732,42 @@ function _generateDashboardReport(contextString = '', reportType = 'all', target
     targetSheet = ss.insertSheet(targetSheetName);
   }
 
-  const dashboardHeaders = [
-    'Image', 'Name', 'Asin', 'SKU', 'Amazon Link', 'Listing status', "Yesterday's Sales", 'Available',
-    'Days of Supply', 'Customer Orders', 'FC Transfers', 'FC Processing', 'Unfulfillable',
-    'Past 31-60 Day Sales', 'Current 30 Day Sales', 'Monthly Difference'
-  ];
-
+  const dashboardHeaders = ['Image', 'Name', 'Asin', 'SKU', 'Amazon Link', 'Listing status', "Yesterday's Sales", 'Available', 'Days of Supply', 'Customer Orders', 'FC Transfers', 'FC Processing', 'Unfulfillable', 'Past 31-60 Day Sales', 'Current 30 Day Sales', 'Monthly Difference'];
   let startRow = 1;
 
-  // Add Context row if provided
   if (contextString) {
     targetSheet.getRange(startRow, 1).setValue(`Dashboard Context: ${contextString}`).setFontWeight('bold');
-    targetSheet.getRange(startRow, 1, 1, dashboardHeaders.length).merge(); // Merge across header width
-    startRow++; // Shift header and data rows down
+    targetSheet.getRange(startRow, 1, 1, dashboardHeaders.length).merge();
+    startRow++;
   }
 
-  // Add Report Type Title
   targetSheet.getRange(startRow, 1).setValue(`Report Type: ${reportTitle}`).setFontWeight('bold');
   targetSheet.getRange(startRow, 1, 1, dashboardHeaders.length).merge();
-  startRow++; // Shift header and data rows down
+  startRow++;
 
   targetSheet.getRange(startRow, 1, 1, dashboardHeaders.length).setValues([dashboardHeaders]).setFontWeight('bold');
 
   if (finalDashboardData.length > 0) {
-    const dataRange = targetSheet.getRange(startRow + 1, 1, finalDashboardData.length, finalDashboardData[0].length);
-    dataRange.setValues(finalDashboardData); // Write all data as values first
-
-    // Then, apply formulas to the image column
     const imageFormulas = finalDashboardData.map(row => [row[0]]);
+    const dataWithoutImageFormula = finalDashboardData.map(row => row.slice(1));
+    targetSheet.getRange(startRow + 1, 2, dataWithoutImageFormula.length, dataWithoutImageFormula[0].length).setValues(dataWithoutImageFormula);
     targetSheet.getRange(startRow + 1, 1, imageFormulas.length, 1).setFormulas(imageFormulas);
   }
 
   targetSheet.setColumnWidth(1, CONFIG.image.width);
-  // Auto-resize from column 2 onwards, as column 1 (Image) has a fixed width.
   targetSheet.autoResizeColumns(2, dashboardHeaders.length - 1);
-  ui.alert('Success!', `"${targetSheetName}" has been updated with ${finalDashboardData.length} products for "${reportTitle}".`, ui.ButtonSet.OK);
+
+  return `"${targetSheetName}" has been updated with ${finalDashboardData.length} products for "${reportType}".`;
 }
 
-// --- Helper Functions ---
-
-/** Processes FBA Inventory data. Now includes header validation. */
-function processInventory(data, ui) {
+/**
+ * Processes inventory data into a SKU-based map.
+ * @param {{headers: string[], data: any[][]}} inventoryDataObject The validated inventory data object.
+ * @returns {object} A map with SKU as key and inventory details as value.
+ */
+function processInventory(inventoryDataObject) {
   const map = {};
-  const headers = data.shift();
-  const required = [CONFIG.headers.invSku, CONFIG.headers.available, CONFIG.headers.daysOfSupply, CONFIG.headers.unfulfillable, CONFIG.headers.reservedCustomer, CONFIG.headers.reservedTransfer, CONFIG.headers.reservedProcessing];
-  const missing = required.filter(h => headers.indexOf(h) === -1);
-  if (missing.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.inventory}": ${missing.join(', ')}`, ui.ButtonSet.OK);
-    return null;
-  }
-
+  const { headers, data } = inventoryDataObject;
   const skuIndex = headers.indexOf(CONFIG.headers.invSku);
   const availableIndex = headers.indexOf(CONFIG.headers.available);
   const daysOfSupplyIndex = headers.indexOf(CONFIG.headers.daysOfSupply);
@@ -484,513 +780,348 @@ function processInventory(data, ui) {
     const sku = row[skuIndex];
     if (sku) {
       map[sku] = {
-        available: row[availableIndex],
-        daysOfSupply: row[daysOfSupplyIndex],
-        unfulfillable: row[unfulfillableIndex],
-        reservedCustomerOrder: row[reservedCustomerIndex],
-        reservedFcTransfer: row[reservedTransferIndex],
-        reservedFcProcessing: row[reservedProcessingIndex]
+        available: parseFloat(row[availableIndex]) || 0,
+        daysOfSupply: parseFloat(row[daysOfSupplyIndex]) || 0,
+        unfulfillable: parseFloat(row[unfulfillableIndex]) || 0,
+        reservedCustomerOrder: parseFloat(row[reservedCustomerIndex]) || 0,
+        reservedFcTransfer: parseFloat(row[reservedTransferIndex]) || 0,
+        reservedFcProcessing: parseFloat(row[reservedProcessingIndex]) || 0
       };
     }
   });
   return map;
 }
 
-/** Processes Sales data. Now includes header validation and robust date logic. */
-function processSales(data, ui) {
+/**
+ * Processes sales data into a SKU-based map for daily, current month, and past month sales.
+ * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
+ * @returns {object} A map with SKU as key and sales details as value.
+ */
+function processSales(salesDataObject) {
   const map = {};
-  const headers = data.shift();
-  const required = [CONFIG.headers.salesSku, CONFIG.headers.purchaseDate, CONFIG.headers.quantity];
-  const missing = required.filter(h => headers.indexOf(h) === -1);
-  if (missing.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.sales}": ${missing.join(', ')}`, ui.ButtonSet.OK);
-    return null;
-  }
-
+  const { headers, data } = salesDataObject;
   const skuIndex = headers.indexOf(CONFIG.headers.salesSku);
   const purchaseDateIndex = headers.indexOf(CONFIG.headers.purchaseDate);
   const quantityIndex = headers.indexOf(CONFIG.headers.quantity);
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-
   const yesterdayStart = new Date(todayStart);
   yesterdayStart.setDate(todayStart.getDate() - 1);
-
   const thirtyDaysAgo = new Date(todayStart);
   thirtyDaysAgo.setDate(todayStart.getDate() - 30);
-
   const sixtyDaysAgo = new Date(todayStart);
   sixtyDaysAgo.setDate(todayStart.getDate() - 60);
 
   data.forEach(row => {
-    const sku = row[skuIndex];
-    // Robust date parsing: Handles various date formats
+    const sku = String(row[skuIndex]).trim();
     const purchaseDate = new Date(row[purchaseDateIndex]);
     const quantity = parseInt(row[quantityIndex], 10);
-
-    if (sku && !isNaN(quantity) && purchaseDate.getTime()) {
-      if (!map[sku]) {
-        map[sku] = { yesterdaySales: 0, currentMonthSales: 0, pastMonthSales: 0 };
-      }
-
-      // ROBUST DATE CHECK: Check if the sale happened between the start of yesterday and start of today
-      if (purchaseDate >= yesterdayStart && purchaseDate < todayStart) {
-        map[sku].yesterdaySales += quantity;
-      }
-
-      if (purchaseDate >= thirtyDaysAgo && purchaseDate < todayStart) {
-        map[sku].currentMonthSales += quantity;
-      }
-
-      if (purchaseDate >= sixtyDaysAgo && purchaseDate < thirtyDaysAgo) {
-        map[sku].pastMonthSales += quantity;
-      }
+    if (sku && !isNaN(quantity) && !isNaN(purchaseDate.getTime())) {
+      if (!map[sku]) map[sku] = { yesterdaySales: 0, currentMonthSales: 0, pastMonthSales: 0 };
+      if (purchaseDate >= yesterdayStart && purchaseDate < todayStart) map[sku].yesterdaySales += quantity;
+      if (purchaseDate >= thirtyDaysAgo && purchaseDate < todayStart) map[sku].currentMonthSales += quantity;
+      if (purchaseDate >= sixtyDaysAgo && purchaseDate < thirtyDaysAgo) map[sku].pastMonthSales += quantity;
     }
   });
   return map;
 }
 
-/** Processes Keepa data to map ASINs to Image URLs. */
-function processKeepa(data, ui) {
+/**
+ * Processes Keepa data into an ASIN-based map for image URLs.
+ * @param {{headers: string[], data: any[][]}} keepaDataObject The validated Keepa data object.
+ * @returns {object} A map with ASIN as key and image URL as value.
+ */
+function processKeepa(keepaDataObject) {
   const map = {};
-  const headers = data.shift();
-  const required = [CONFIG.headers.keepaAsin, CONFIG.headers.keepaImage];
-  const missing = required.filter(h => headers.indexOf(h) === -1);
-  if (missing.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.keepa}": ${missing.join(', ')}`, ui.ButtonSet.OK);
-    return null;
-  }
-
+  const { headers, data } = keepaDataObject;
   const asinIndex = headers.indexOf(CONFIG.headers.keepaAsin);
   const imageIndex = headers.indexOf(CONFIG.headers.keepaImage);
 
   data.forEach(row => {
-    const asin = row[asinIndex];
-    const imageUrl = row[imageIndex];
-    if (asin && imageUrl) {
-      map[asin] = imageUrl;
-    }
+    const asin = String(row[asinIndex]).trim();
+    const imageUrl = String(row[imageIndex]).trim();
+    if (asin && imageUrl) map[asin] = imageUrl;
   });
   return map;
+}
+
+// --- UTILITY FUNCTIONS --- //
+
+// --- REFINEMENT ---
+// The error handler is updated to prevent the "Cannot read properties of undefined (reading 'alert')"
+// error. It now checks if a UI context is available before attempting to show a UI alert.
+// It will always log the full error for debugging, regardless of the context.
+/**
+ * A centralized error handler. Logs the error and shows a user-friendly alert if in a UI context.
+ * @param {Error} e The error object that was caught.
+ * @param {GoogleAppsScript.Spreadsheet.Ui | null} ui The spreadsheet UI instance, which may not exist.
+ * @param {string} functionName The name of the function where the error occurred.
+ */
+function _handleError(e, ui, functionName = 'unknown') {
+  const errorMessage = `An error occurred in function '${functionName}': ${e.message}`;
+  const errorStack = e.stack ? `\nStack Trace: ${e.stack}` : '';
+
+  // Always log the detailed error for developer debugging.
+  Logger.log(`${errorMessage}${errorStack}`);
+
+  // Only show a popup alert if the script is running in an interactive UI context.
+  if (ui && typeof ui.alert === 'function') {
+    ui.alert('Script Error', errorMessage, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Validates a sheet and its headers, returning the data if valid.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
+ * @param {string} sheetName The name of the sheet to validate.
+ * @param {string[]} requiredHeaders An array of header names that must be present.
+ * @throws {Error} If the sheet is not found, is empty, or is missing required headers.
+ * @returns {{headers: string[], data: any[][]}} An object containing the header row and the data rows.
+ */
+function _getValidatedData(ss, sheetName, requiredHeaders) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Required sheet "${sheetName}" not found.`);
+  
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 1) throw new Error(`Sheet "${sheetName}" is empty.`);
+  
+  const headers = data[0].map(h => String(h).trim());
+  const headerSet = new Set(headers);
+  const missingHeaders = requiredHeaders.filter(h => !headerSet.has(h));
+
+  if (missingHeaders.length > 0) {
+    throw new Error(`Missing required columns in "${sheetName}": ${missingHeaders.join(', ')}`);
+  }
+
+  return { headers: headers, data: data.slice(1) };
 }
 ```
 
 ### 7.2. `Sidebar.html`
 
 ```html
-/**
- * @OnlyCurrentDoc
- * This script creates consolidated Amazon dashboards from three source reports,
- * now supporting distinct sheets for All, Active, and Inactive listings.
- * VERSION 10: Supports separate output tabs for different report types.
- */
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <!-- Using Google's standard CSS package for a clean, modern look -->
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+    <style>
+        /* General Body and Container Refinements */
+        body {
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 15px;
+            background-color: #ffffff;
+        }
 
-// --- CONFIGURATION --- //
-// Central configuration for all sheet names and column headers.
-// If Amazon changes a report column name, you only need to update it here.
-const CONFIG = {
-  sheets: {
-    listing: 'All_Listing_Report',
-    inventory: 'FBA_Inventory_Snapshot',
-    sales: 'FBA_Shipments_60_Days', // This is your All Orders Report
-    keepa: 'Keepa',                  // New: Keepa sheet
-    dashboard: 'Dashboard',          // Main dashboard for 'All' listings
-    activeListings: 'Active_Listing',  // New: Sheet for Active listings
-    inactiveListings: 'Inactive_Listing' // New: Sheet for Inactive listings
-  },
-  headers: {
-    listingSku: 'seller-sku', // SKU header used in All_Listing_Report
-    salesSku: 'sku',         // SKU header used in FBA_Shipments_60_Days (as per your feedback)
-    invSku: 'sku',           // Specific SKU header for FBA_Inventory_Snapshot (already 'sku')
-    asin: 'asin1',
-    itemName: 'item-name',
-    status: 'status',
-    available: 'available',
-    daysOfSupply: 'days-of-supply',
-    unfulfillable: 'unfulfillable-quantity',
-    reservedCustomer: 'Reserved Customer Order',
-    reservedTransfer: 'Reserved FC Transfer',
-    reservedProcessing: 'Reserved FC Processing',
-    purchaseDate: 'purchase-date',
-    quantity: 'quantity',
-    // Keepa specific headers
-    keepaAsin: 'ASIN',
-    keepaImage: 'Image'
-  },
-  image: {
-    width: 100 // Width of the image column in pixels
-  },
-  // Define exact strings for listing statuses from your reports
-  listingStatus: {
-    active: 'Active',   // Confirm this exact string from your 'status' column
-    inactive: 'Inactive' // Confirm this exact string from your 'status' column
-  }
-};
-// --- END CONFIGURATION ---
+        /* Brand Name Header */
+        .brand-header {
+            text-align: center;
+            padding: 20px 15px;
+            margin-bottom: 20px;
+            background-color: #ffffff;
+            border-bottom: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            font-size: 1.8em;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: center;
+            align-items: baseline;
+        }
 
-/**
- * Creates a custom menu and opens the sidebar when the spreadsheet is opened.
- */
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Dashboard Tools')
-    .addItem('Open Dashboard Controls', 'showSidebar') // Emphasize sidebar as primary control
-    .addToUi();
-  showSidebar(); // Automatically open the sidebar for the user
-}
+        .brand-header span {
+            display: inline-block;
+        }
 
-/**
- * Shows the custom HTML sidebar.
- */
-function showSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
-    .setTitle('Dashboard Controls')
-    .setWidth(300);
-  SpreadsheetApp.getUi().showSidebar(html);
-}
+        .brand-va {
+            color: #000000; /* Black for "VA" */
+        }
 
-/**
- * Wrapper function called by the sidebar to dispatch to the correct report generator.
- * This acts as the entry point for sidebar interactions.
- * @param {string} contextString - The optional context string provided by the user.
- * @param {string} reportType - The type of report to generate ('all', 'inactive', 'active').
- */
-function createConsolidatedDashboardFromSidebar(contextString, reportType) {
-  const ui = SpreadsheetApp.getUi();
-  try {
-    if (reportType === 'all') {
-      generateAllListingsDashboard(contextString);
-    } else if (reportType === 'inactive') {
-      generateInactiveListingsDashboard(contextString);
-    } else if (reportType === 'active') {
-      generateActiveListingsDashboard(contextString);
-    } else {
-      throw new Error('Invalid report type specified. Please select "all", "inactive", or "active".');
-    }
-  } catch (e) {
-    ui.alert('Generation Error', e.message, ui.ButtonSet.OK);
-  }
-}
+        .brand-xtreme {
+            background: linear-gradient(to right, #FFD700, #DAA520); /* Richer Gold Gradient */
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-fill-color: transparent;
+            margin: 0 4px;
+            font-size: 1.1em;
+        }
 
-/**
- * Generates the 'All Listings' dashboard on the 'Dashboard' tab.
- * @param {string} contextString - An optional string to add as context.
- */
-function generateAllListingsDashboard(contextString = '') {
-  _generateDashboardReport(contextString, 'all', CONFIG.sheets.dashboard);
-}
+        .brand-ph {
+            color: #000000; /* Black for "PH" */
+        }
+        
+        /* Input & Select Group Styles */
+        .form-group {
+            margin-bottom: 15px;
+        }
 
-/**
- * Generates the 'Inactive Listings' dashboard on the 'Inactive_Listing' tab.
- * @param {string} contextString - An optional string to add as context.
- */
-function generateInactiveListingsDashboard(contextString = '') {
-  _generateDashboardReport(contextString, 'inactive', CONFIG.sheets.inactiveListings);
-}
+        label {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+        }
 
-/**
- * Generates the 'Active Listings' dashboard on the 'Active_Listing' tab.
- * @param {string} contextString - An optional string to add as context.
- */
-function generateActiveListingsDashboard(contextString = '') {
-  _generateDashboardReport(contextString, 'active', CONFIG.sheets.activeListings);
-}
+        input[type="text"], select {
+            width: 100%; /* Changed to 100% for better responsiveness */
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.95em;
+            background-color: #fff; /* Ensure select has a background */
+        }
+        
+        input[type="text"]:focus, select:focus {
+            border-color: #DAA520; /* Gold focus highlight */
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(218, 165, 32, 0.2);
+        }
 
+        /* --- REFINED BUTTON STYLES --- */
+        #generateBtn {
+            width: 100%;
+            padding: 12px 15px; /* Increased padding for a better feel */
+            border: 1px solid #DAA520;
+            border-radius: 5px;
+            font-size: 1.1em; /* Made text slightly larger */
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            
+            /* FIX: Centering the text */
+            display: flex;
+            justify-content: center;
+            align-items: center;
 
-/**
- * Core function to create a consolidated dashboard based on specified report type and target sheet.
- * This version correctly generates image formulas using Keepa data and adds a direct link to the Amazon page,
- * and now supports filtering and sorting based on report type, writing to a specified sheet.
- * @param {string} [contextString=''] - An optional string to add as context to the dashboard.
- * @param {string} [reportType='all'] - The type of report to generate ('all', 'inactive', 'active').
- * @param {string} targetSheetName - The name of the sheet where the report will be written.
- */
-function _generateDashboardReport(contextString = '', reportType = 'all', targetSheetName) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const ui = SpreadsheetApp.getUi();
+            /* Primary Action Button - Gradient Gold */
+            background: linear-gradient(to right, #FFD700, #FFA500);
+            color: #000000; /* Black text for high contrast */
+        }
 
-  // --- 1. Get Source Sheets ---
-  const listingSheet = ss.getSheetByName(CONFIG.sheets.listing);
-  const inventorySheet = ss.getSheetByName(CONFIG.sheets.inventory);
-  const salesSheet = ss.getSheetByName(CONFIG.sheets.sales);
-  const keepaSheet = ss.getSheetByName(CONFIG.sheets.keepa);
+        #generateBtn:hover:not(:disabled) {
+            background: linear-gradient(to right, #e6c200, #e69500);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+            transform: translateY(-1px); /* Add subtle lift */
+        }
+        
+        /* Disabled State for the button */
+        #generateBtn:disabled {
+            background: #e0e0e0; /* Muted Grey */
+            color: #9e9e9e; /* Lighter grey text */
+            border-color: #e0e0e0;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
 
-  if (!listingSheet || !inventorySheet || !salesSheet || !keepaSheet) {
-    ui.alert('Error', `Please make sure all source sheets exist: ${CONFIG.sheets.listing}, ${CONFIG.sheets.inventory}, ${CONFIG.sheets.sales}, ${CONFIG.sheets.keepa}`, ui.ButtonSet.OK);
-    return;
-  }
+        /* Spinner and Alert styles */
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #DAA520; /* Gold to match brand */
+            border-radius: 50%;
+            width: 25px;
+            height: 25px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .alert {
+            padding: 12px;
+            border-radius: 5px;
+            color: white;
+            margin-top: 15px;
+            font-weight: 500;
+        }
+        .alert-success { background-color: #28a745; }
+        .alert-error { background-color: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="brand-header">
+        <span class="brand-va">VA</span><span class="brand-xtreme">Xtreme</span><span class="brand-ph">PH</span>
+    </div>
 
-  // --- 2. Get and Validate Data ---
-  const listingData = listingSheet.getDataRange().getValues();
-  const inventoryData = inventorySheet.getDataRange().getValues();
-  const salesData = salesSheet.getDataRange().getValues();
-  const keepaData = keepaSheet.getDataRange().getValues();
+    <div class="container">
+        <div id="statusAlert" class="alert" style="display:none;"></div>
 
-  // Helper function to find missing headers
-  const findMissingHeaders = (actualHeaders, requiredHeaders) => {
-    const headerSet = new Set(actualHeaders);
-    return requiredHeaders.filter(h => !headerSet.has(h));
-  };
+        <!-- Grouping all form elements together -->
+        <div class="form-group">
+            <label for="contextInput">Dashboard Context (Optional)</label>
+            <input type="text" id="contextInput" placeholder="e.g., Q2 Inventory Review">
+        </div>
 
-  // Validate Listing Sheet Headers
-  const listingHeaders = listingData[0];
-  let missingListingHeaders = findMissingHeaders(listingHeaders, [CONFIG.headers.listingSku, CONFIG.headers.asin, CONFIG.headers.itemName, CONFIG.headers.status]);
-  if (missingListingHeaders.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.listing}": ${missingListingHeaders.join(', ')}`, ui.ButtonSet.OK);
-    return;
-  }
+        <!-- NEW: Dropdown for selecting report type -->
+        <div class="form-group">
+            <label for="reportTypeSelect">Analysis Type</label>
+            <select id="reportTypeSelect">
+                <!-- 'analysis' is the value for the original primary button -->
+                <option value="analysis">General Analysis Tab</option>
+                <option value="all">All Listings Dashboard</option>
+                <option value="inactive">Inactive Listings (FBA-SKU)</option>
+                <option value="active">Active Listings (Sorted by DoS)</option>
+            </select>
+        </div>
 
-  // --- 3. Process Data into Maps ---
-  const inventoryMap = processInventory(inventoryData, ui);
-  if (!inventoryMap) return;
-  const salesMap = processSales(salesData, ui);
-  if (!salesMap) return;
-  const keepaMap = processKeepa(keepaData, ui);
-  if (!keepaMap) return;
+        <!-- NEW: Single, consolidated button -->
+        <button id="generateBtn" onclick="runReport()">Generate</button>
 
-  // Get column indexes from Listing Report
-  const skuListingIndex = listingHeaders.indexOf(CONFIG.headers.listingSku);
-  const asinListingIndex = listingHeaders.indexOf(CONFIG.headers.asin);
-  const nameListingIndex = listingHeaders.indexOf(CONFIG.headers.itemName);
-  const statusListingIndex = listingHeaders.indexOf(CONFIG.headers.status);
+        <div id="loadingSpinner" class="spinner" style="display:none;"></div>
+    </div>
 
-  // --- 4. Build ALL Dashboard Data (before filtering/sorting) ---
-  const allDashboardData = [];
-  listingData.slice(1).forEach(row => { // Use slice(1) to skip header row
-    const sku = row[skuListingIndex];
-    if (!sku) return; // Skip rows with no SKU
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // No changes needed here
+        });
 
-    const inventory = inventoryMap[sku] || {};
-    const sales = salesMap[sku] || {};
+        // MODIFIED: The function no longer needs a parameter
+        function runReport() {
+            // GETTING VALUES: Now we get the report type from the dropdown
+            const contextString = document.getElementById('contextInput').value;
+            const reportType = document.getElementById('reportTypeSelect').value; // Get value from the select menu
+            
+            const generateButton = document.getElementById('generateBtn');
+            const spinner = document.getElementById('loadingSpinner');
+            const alertBox = document.getElementById('statusAlert');
 
-    // --- Image Formula & Amazon Link Generation (Using Keepa Image) ---
-    const asin = row[asinListingIndex];
-    let imageFormula = ""; // Default to blank if no ASIN or Keepa image
-    let amazonLink = "";   // Default link to blank
+            generateButton.disabled = true; // Only one button to disable now
+            spinner.style.display = 'block';
+            alertBox.style.display = 'none';
 
-    if (asin) {
-      const keepaImageUrl = keepaMap[asin];
-      // Use the Keepa image URL if available, otherwise a generic placeholder
-      if (keepaImageUrl) {
-        imageFormula = `=IMAGE("${keepaImageUrl}")`;
-      } else {
-        // Fallback placeholder image if Keepa data doesn't have it
-        imageFormula = `=IMAGE("https://via.placeholder.com/${CONFIG.image.width}x${CONFIG.image.width/1.2}.png?text=No+Image")`;
-      }
-
-      // Create the direct product link using the ASIN
-      amazonLink = `https://www.amazon.com/dp/${asin}`;
-    }
-
-    const pastMonthSales = sales.pastMonthSales || 0;
-    const currentMonthSales = sales.currentMonthSales || 0;
-    const monthlyDifference = currentMonthSales - pastMonthSales;
-
-    allDashboardData.push([
-      imageFormula, // Index 0
-      row[nameListingIndex] || 'N/A', // Index 1
-      asin || 'N/A', // Index 2
-      sku, // Index 3
-      amazonLink, // Index 4
-      row[statusListingIndex] || 'N/A', // Index 5: Listing Status
-      sales.yesterdaySales || 0, // Index 6
-      inventory.available || 0, // Index 7
-      inventory.daysOfSupply || 0, // Index 8: Days of Supply
-      inventory.reservedCustomerOrder || 0, // Index 9
-      inventory.reservedFcTransfer || 0, // Index 10
-      inventory.reservedFcProcessing || 0, // Index 11
-      inventory.unfulfillable || 0, // Index 12
-      pastMonthSales, // Index 13
-      currentMonthSales, // Index 14
-      monthlyDifference // Index 15
-    ]);
-  });
-
-  // --- 5. Apply Filtering and Sorting based on reportType ---
-  let finalDashboardData = [...allDashboardData]; // Start with all data
-  let reportTitle = "All Listings"; // Default title
-
-  if (reportType === 'inactive') {
-    reportTitle = "Inactive Listings (FBA-SKU Filtered)";
-    finalDashboardData = finalDashboardData.filter(row => {
-      const status = row[5]; // Index of 'Listing status'
-      const sku = String(row[3]);    // Index of 'SKU', ensure it's a string
-      return status === CONFIG.listingStatus.inactive && sku.toUpperCase().startsWith('FBA-');
-    });
-  } else if (reportType === 'active') {
-    reportTitle = "Active Listings (Sorted by Days of Supply)";
-    finalDashboardData = finalDashboardData.filter(row => {
-      const status = row[5]; // Index of 'Listing status'
-      return status === CONFIG.listingStatus.active;
-    });
-    // Sort active listings by 'Days of Supply' from lowest to highest
-    finalDashboardData.sort((a, b) => {
-      // Ensure numeric comparison; treat empty/invalid as Infinity for sorting to end
-      const daysA = parseFloat(a[8]) || Infinity;
-      const daysB = parseFloat(b[8]) || Infinity;
-      return daysA - daysB;
-    });
-  }
-
-  // --- 6. Write Data to Target Sheet ---
-  let targetSheet = ss.getSheetByName(targetSheetName);
-  if (targetSheet) {
-    targetSheet.clear();
-  } else {
-    targetSheet = ss.insertSheet(targetSheetName);
-  }
-
-  const dashboardHeaders = [
-    'Image', 'Name', 'Asin', 'SKU', 'Amazon Link', 'Listing status', "Yesterday's Sales", 'Available',
-    'Days of Supply', 'Customer Orders', 'FC Transfers', 'FC Processing', 'Unfulfillable',
-    'Past 31-60 Day Sales', 'Current 30 Day Sales', 'Monthly Difference'
-  ];
-
-  let startRow = 1;
-
-  // Add Context row if provided
-  if (contextString) {
-    targetSheet.getRange(startRow, 1).setValue(`Dashboard Context: ${contextString}`).setFontWeight('bold');
-    targetSheet.getRange(startRow, 1, 1, dashboardHeaders.length).merge(); // Merge across header width
-    startRow++; // Shift header and data rows down
-  }
-
-  // Add Report Type Title
-  targetSheet.getRange(startRow, 1).setValue(`Report Type: ${reportTitle}`).setFontWeight('bold');
-  targetSheet.getRange(startRow, 1, 1, dashboardHeaders.length).merge();
-  startRow++; // Shift header and data rows down
-
-  targetSheet.getRange(startRow, 1, 1, dashboardHeaders.length).setValues([dashboardHeaders]).setFontWeight('bold');
-
-  if (finalDashboardData.length > 0) {
-    const dataRange = targetSheet.getRange(startRow + 1, 1, finalDashboardData.length, finalDashboardData[0].length);
-    dataRange.setValues(finalDashboardData); // Write all data as values first
-
-    // Then, apply formulas to the image column
-    const imageFormulas = finalDashboardData.map(row => [row[0]]);
-    targetSheet.getRange(startRow + 1, 1, imageFormulas.length, 1).setFormulas(imageFormulas);
-  }
-
-  targetSheet.setColumnWidth(1, CONFIG.image.width);
-  // Auto-resize from column 2 onwards, as column 1 (Image) has a fixed width.
-  targetSheet.autoResizeColumns(2, dashboardHeaders.length - 1);
-  ui.alert('Success!', `"${targetSheetName}" has been updated with ${finalDashboardData.length} products for "${reportTitle}".`, ui.ButtonSet.OK);
-}
-
-// --- Helper Functions ---
-
-/** Processes FBA Inventory data. Now includes header validation. */
-function processInventory(data, ui) {
-  const map = {};
-  const headers = data.shift();
-  const required = [CONFIG.headers.invSku, CONFIG.headers.available, CONFIG.headers.daysOfSupply, CONFIG.headers.unfulfillable, CONFIG.headers.reservedCustomer, CONFIG.headers.reservedTransfer, CONFIG.headers.reservedProcessing];
-  const missing = required.filter(h => headers.indexOf(h) === -1);
-  if (missing.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.inventory}": ${missing.join(', ')}`, ui.ButtonSet.OK);
-    return null;
-  }
-
-  const skuIndex = headers.indexOf(CONFIG.headers.invSku);
-  const availableIndex = headers.indexOf(CONFIG.headers.available);
-  const daysOfSupplyIndex = headers.indexOf(CONFIG.headers.daysOfSupply);
-  const unfulfillableIndex = headers.indexOf(CONFIG.headers.unfulfillable);
-  const reservedCustomerIndex = headers.indexOf(CONFIG.headers.reservedCustomer);
-  const reservedTransferIndex = headers.indexOf(CONFIG.headers.reservedTransfer);
-  const reservedProcessingIndex = headers.indexOf(CONFIG.headers.reservedProcessing);
-
-  data.forEach(row => {
-    const sku = row[skuIndex];
-    if (sku) {
-      map[sku] = {
-        available: row[availableIndex],
-        daysOfSupply: row[daysOfSupplyIndex],
-        unfulfillable: row[unfulfillableIndex],
-        reservedCustomerOrder: row[reservedCustomerIndex],
-        reservedFcTransfer: row[reservedTransferIndex],
-        reservedFcProcessing: row[reservedProcessingIndex]
-      };
-    }
-  });
-  return map;
-}
-
-/** Processes Sales data. Now includes header validation and robust date logic. */
-function processSales(data, ui) {
-  const map = {};
-  const headers = data.shift();
-  const required = [CONFIG.headers.salesSku, CONFIG.headers.purchaseDate, CONFIG.headers.quantity];
-  const missing = required.filter(h => headers.indexOf(h) === -1);
-  if (missing.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.sales}": ${missing.join(', ')}`, ui.ButtonSet.OK);
-    return null;
-  }
-
-  const skuIndex = headers.indexOf(CONFIG.headers.salesSku);
-  const purchaseDateIndex = headers.indexOf(CONFIG.headers.purchaseDate);
-  const quantityIndex = headers.indexOf(CONFIG.headers.quantity);
-
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-
-  const yesterdayStart = new Date(todayStart);
-  yesterdayStart.setDate(todayStart.getDate() - 1);
-
-  const thirtyDaysAgo = new Date(todayStart);
-  thirtyDaysAgo.setDate(todayStart.getDate() - 30);
-
-  const sixtyDaysAgo = new Date(todayStart);
-  sixtyDaysAgo.setDate(todayStart.getDate() - 60);
-
-  data.forEach(row => {
-    const sku = row[skuIndex];
-    // Robust date parsing: Handles various date formats
-    const purchaseDate = new Date(row[purchaseDateIndex]);
-    const quantity = parseInt(row[quantityIndex], 10);
-
-    if (sku && !isNaN(quantity) && purchaseDate.getTime()) {
-      if (!map[sku]) {
-        map[sku] = { yesterdaySales: 0, currentMonthSales: 0, pastMonthSales: 0 };
-      }
-
-      // ROBUST DATE CHECK: Check if the sale happened between the start of yesterday and start of today
-      if (purchaseDate >= yesterdayStart && purchaseDate < todayStart) {
-        map[sku].yesterdaySales += quantity;
-      }
-
-      if (purchaseDate >= thirtyDaysAgo && purchaseDate < todayStart) {
-        map[sku].currentMonthSales += quantity;
-      }
-
-      if (purchaseDate >= sixtyDaysAgo && purchaseDate < thirtyDaysAgo) {
-        map[sku].pastMonthSales += quantity;
-      }
-    }
-  });
-  return map;
-}
-
-/** Processes Keepa data to map ASINs to Image URLs. */
-function processKeepa(data, ui) {
-  const map = {};
-  const headers = data.shift();
-  const required = [CONFIG.headers.keepaAsin, CONFIG.headers.keepaImage];
-  const missing = required.filter(h => headers.indexOf(h) === -1);
-  if (missing.length > 0) {
-    ui.alert('Error', `Missing columns in "${CONFIG.sheets.keepa}": ${missing.join(', ')}`, ui.ButtonSet.OK);
-    return null;
-  }
-
-  const asinIndex = headers.indexOf(CONFIG.headers.keepaAsin);
-  const imageIndex = headers.indexOf(CONFIG.headers.keepaImage);
-
-  data.forEach(row => {
-    const asin = row[asinIndex];
-    const imageUrl = row[imageIndex];
-    if (asin && imageUrl) {
-      map[asin] = imageUrl;
-    }
-  });
-  return map;
-}
+            google.script.run
+                .withSuccessHandler(message => {
+                    generateButton.disabled = false;
+                    spinner.style.display = 'none';
+                    alertBox.textContent = message || 'Operation completed successfully!';
+                    alertBox.className = 'alert alert-success';
+                    alertBox.style.display = 'block';
+                })
+                .withFailureHandler(error => {
+                    generateButton.disabled = false;
+                    spinner.style.display = 'none';
+                    alertBox.textContent = 'Error: ' + error.message;
+                    alertBox.className = 'alert alert-error';
+                    alertBox.style.display = 'block';
+                })
+                // The backend function is called with the selected report type
+                .createConsolidatedDashboardFromSidebar(contextString, reportType);
+        }
+    </script>
+</body>
+</html>
 ```
