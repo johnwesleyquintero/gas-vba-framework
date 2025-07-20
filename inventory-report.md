@@ -1,22 +1,46 @@
 # Amazon Consolidated Dashboard Script for Google Sheets
 
-This documentation provides a comprehensive guide to the Google Apps Script (GAS) solution designed to consolidate Amazon FBA data into dynamic, user-friendly dashboards within Google Sheets. This script automates the process of combining information from your Amazon Listing, Inventory, and Sales reports, along with external Keepa data, to provide critical insights into your product catalog.
+This documentation provides a comprehensive guide to the Google Apps Script (GAS) solution designed to consolidate Amazon FBA data into dynamic, user-friendly dashboards within Google Sheets. This script automates the process of combining information from your Amazon Listing and Inventory reports, along with external Keepa data, to provide critical insights into your product catalog.
 
-The solution supports generating distinct dashboards for 'All Listings', 'Active Listings', and 'Inactive Listings', with intelligent filtering and sorting capabilities.
+The solution supports generating distinct dashboards for 'All Listings', 'Active Listings', and 'Inactive Listings', with intelligent filtering and sorting capabilities. A previous feature for a detailed 'Analysis' tab has been disabled due to changes in Amazon's reporting structure, which no longer provides the necessary transactional data.
+
+## Report Endpoints Used to Download/Pull Data Manually
+
+To keep the dashboard updated, you will need to periodically download the following reports from Amazon Seller Central and Keepa and paste their contents into the corresponding tabs in your Google Sheet.
+
+**Required Reports:**
+
+*   **All_Listing_Report**
+    ```
+    https://sellercentral.amazon.com/listing/reports
+    ```
+*   **FBA_Inventory_Snapshot** (This report provides both inventory levels and aggregated sales data)
+    ```
+    https://sellercentral.amazon.com/reportcentral/MANAGE_INVENTORY_HEALTH/1
+    ```
+*   **Keepa Data** (Used for retrieving product image addresses)
+    ```
+    https://keepa.com/#!viewer
+    ```
+
+**Deprecated Reports (No longer used by the script):**
+The following reports were used in previous versions but are not required for the current script to function: `Reserved_Inventory_Snapshot` and `FBA_Shipments_60_Days`.
+
+---
 
 ## 1. Features
 
-*   **Data Consolidation:** Seamlessly combines data from `All_Listing_Report`, `FBA_Inventory_Snapshot`, `FBA_Shipments_60_Days`, and `Keepa` sheets.
+*   **Data Consolidation:** Seamlessly combines data from `All_Listing_Report`, `FBA_Inventory_Snapshot`, and `Keepa` sheets.
 *   **Multiple Dashboard Views:** Generates three distinct dashboards:
-    *   **All Listings:** A comprehensive view of all products.
-    *   **Active Listings:** Filters for active listings and sorts them by 'Days of Supply' (lowest first).
-    *   **Inactive Listings:** Filters for inactive listings and specifically targets FBA-SKU items.
-*   **Product Visuals:** Automatically pulls product images via Keepa data, displaying them directly in the dashboard using `IMAGE()` formulas.
+    *   **All Listings:** A comprehensive view of all your products.
+    *   **Active Listings:** Filters for active listings and sorts them by 'Days of Supply' (lowest first) to help identify items needing attention.
+    *   **Inactive Listings:** Filters for inactive listings and specifically targets FBA-SKU items for potential archiving or relisting.
+*   **Product Visuals:** Automatically pulls product images via Keepa data, displaying them directly in the dashboard using `=IMAGE()` formulas.
 *   **Direct Amazon Links:** Generates clickable links to the Amazon product page for each ASIN.
-*   **Sales Performance Metrics:** Calculates and displays 'Yesterday\'s Sales', 'Current 30 Day Sales', 'Past 31-60 Day Sales', and 'Monthly Difference'.
-*   **Inventory Insights:** Includes 'Available' quantity, 'Days of Supply', 'Unfulfillable', and detailed 'Reserved' inventory breakdowns.
-*   **User-Friendly Interface:** Provides a custom sidebar within Google Sheets for easy generation of different report types.
-*   **Configurable Headers:** Centralized configuration allows easy adjustment of column headers, providing resilience against potential changes in Amazon report formats.
+*   **Sales Performance Metrics:** Calculates and displays key sales trends using aggregated data: "Sales Last 7 Days," "Current 30 Day Sales," "Past 31-60 Day Sales," and the "Monthly Difference."
+*   **Inventory Insights:** Includes 'Available' quantity, 'Days of Supply', 'Unfulfillable', and detailed 'Reserved' inventory breakdowns (Customer Orders, FC Transfers, FC Processing).
+*   **User-Friendly Interface:** Provides a custom sidebar within Google Sheets for easy generation of different report types via a simple dropdown menu.
+*   **Configurable & Resilient:** A centralized `CONFIG` object allows for easy adjustment of sheet names and column headers, providing resilience against future changes in Amazon's report formats.
 
 ## 2. Setup Instructions
 
@@ -26,63 +50,72 @@ To implement this solution, you will need a Google Sheet and access to Google Ap
 
 1.  **Create a New Google Sheet:** Open Google Sheets and create a new blank spreadsheet.
 2.  **Open Apps Script Editor:** Go to `Extensions > Apps Script`. This will open a new browser tab with the Apps Script editor.
-3.  **Create `Code.gs`:** In the Apps Script editor, you'll typically see a `Code.gs` file by default. Replace its content with the JavaScript code provided in Section 7.1.
+3.  **Create `Code.gs`:** In the Apps Script editor, you'll see a `Code.gs` file by default. Replace its content with the JavaScript code provided in **Section 7.1**.
 4.  **Create `Sidebar.html`:**
-    *   In the Apps Script editor, click `+` next to "Files" in the left sidebar, then select `HTML`.
+    *   In the Apps Script editor, click the `+` icon next to "Files" in the left sidebar, then select `HTML`.
     *   Name the new file `Sidebar`.
-    *   Paste the HTML code provided in Section 7.2 into this new `Sidebar.html` file.
+    *   Paste the HTML code provided in **Section 7.2** into this new `Sidebar.html` file.
 5.  **Save the Project:** Click the save icon (floppy disk) or press `Ctrl + S` (`Cmd + S` on Mac) to save both files.
 6.  **Rename the Default Sheet:** In your Google Sheet, ensure you have a sheet named `Dashboard`. If your default sheet is `Sheet1`, rename it to `Dashboard`. This is the default target for the 'All Listings' report.
 7.  **Create Source Data Sheets:** Create the following sheets in your Google Spreadsheet. **Their names must precisely match the `CONFIG.sheets` values in the `Code.gs` script.**
     *   `All_Listing_Report`
     *   `FBA_Inventory_Snapshot`
-    *   `FBA_Shipments_60_Days`
     *   `Keepa`
-8.  **Populate Source Data:** Import or paste your Amazon reports into their respective sheets. Ensure the column headers in your reports match the `CONFIG.headers` defined in the `Code.gs` script. **This is critical for the script to correctly locate data.**
+8.  **Populate Source Data:** Import or paste your downloaded reports into their respective sheets. Ensure the column headers in your reports match the `CONFIG.headers` defined in the `Code.gs` script. **This is critical for the script to locate the correct data.**
 
 ## 3. Usage
 
 Once set up, the script integrates directly into your Google Sheet interface.
 
-1.  **Open the Spreadsheet:** When you open your Google Sheet, a custom menu item "Dashboard Tools" will appear in the top menu bar, and the "Dashboard Controls" sidebar will automatically open on the right.
-2.  **Enter Optional Context:** In the sidebar, you can enter an optional "Dashboard Context" string (e.g., "Q2 Inventory Review"). This text will be added to the top of the generated dashboard.
-3.  **Select Report Type:** Choose one of the three buttons to generate your desired dashboard:
-    *   **Generate All Listings Dashboard:** Creates a consolidated report of all listings on the `Dashboard` sheet.
-    *   **Generate Inactive Listings (FBA-SKU) Dashboard:** Creates a filtered report of inactive FBA listings on the `Inactive_Listing` sheet.
-    *   **Generate Active Listings (Sorted by DoS) Dashboard:** Creates a filtered report of active listings, sorted by 'Days of Supply', on the `Active_Listing` sheet.
-4.  **Monitor Progress:** A loading spinner will appear while the script runs. Status messages (success or error) will be displayed at the top of the sidebar.
-5.  **Review Dashboards:** The script will create or clear and update the relevant target sheet (`Dashboard`, `Active_Listing`, `Inactive_Listing`) with the generated data.
+1.  **Open the Spreadsheet:** When you open your Google Sheet, a custom menu "Dashboard Tools" will appear, and the "Dashboard Controls" sidebar will automatically open on the right.
+2.  **Enter Optional Context:** In the sidebar, you can enter an optional "Dashboard Context" string (e.g., "Q2 Inventory Review"). This text will be added to the top of the generated dashboard for reference.
+3.  **Select Analysis Type:** Use the dropdown menu to choose which report you want to generate.
+    *   **All Listings Dashboard:** Creates a consolidated report of all listings on the `Dashboard` sheet.
+    *   **Inactive Listings (FBA-SKU):** Creates a filtered report of inactive FBA listings on the `Inactive_Listing` sheet.
+    *   **Active Listings (Sorted by DoS):** Creates a filtered report of active listings, sorted by 'Days of Supply', on the `Active_Listing` sheet.
+    *   **General Analysis Tab:** This option is disabled. Selecting it will produce an error message explaining that the feature is unavailable due to the new data schema.
+4.  **Generate the Report:** Click the **Generate** button.
+5.  **Monitor Progress:** A loading spinner will appear while the script runs. Status messages (success or error) will be displayed at the top of the sidebar.
+6.  **Review Dashboards:** The script will create or clear and update the relevant target sheet (`Dashboard`, `Active_Listing`, `Inactive_Listing`) with the generated data.
 
 ## 4. Configuration
 
-The `CONFIG` object at the top of `Code.gs` is the central place for all user-adjustable settings.
+The `CONFIG` object at the top of `Code.gs` is the central hub for all user-adjustable settings.
 
 ```javascript
 const CONFIG = {
   sheets: {
     listing: 'All_Listing_Report',
     inventory: 'FBA_Inventory_Snapshot',
-    sales: 'FBA_Shipments_60_Days',
+    shipments: 'FBA_Shipments_60_Days', // Not used in current version
+    reserved: 'Reserved_Inventory_Snapshot', // Not used in current version
     keepa: 'Keepa',
     dashboard: 'Dashboard',
     activeListings: 'Active_Listing',
-    inactiveListings: 'Inactive_Listing'
+    inactiveListings: 'Inactive_Listing',
+    analysis: 'Analysis',
+    chartData: '_AnalysisChartData'
   },
   headers: {
+    // All_Listing_Report Headers
     listingSku: 'seller-sku',
-    salesSku: 'sku',
-    invSku: 'sku',
     asin: 'asin1',
     itemName: 'item-name',
     status: 'status',
+
+    // FBA_Inventory_Snapshot Headers
+    invSku: 'sku',
     available: 'available',
     daysOfSupply: 'days-of-supply',
     unfulfillable: 'unfulfillable-quantity',
     reservedCustomer: 'Reserved Customer Order',
     reservedTransfer: 'Reserved FC Transfer',
     reservedProcessing: 'Reserved FC Processing',
-    purchaseDate: 'purchase-date',
-    quantity: 'quantity',
+    salesT7: 'sales-shipped-last-7-days',
+    salesT30: 'sales-shipped-last-30-days',
+    salesT60: 'sales-shipped-last-60-days',
+
+    // Keepa Headers
     keepaAsin: 'ASIN',
     keepaImage: 'Image'
   },
@@ -96,9 +129,9 @@ const CONFIG = {
 };
 ```
 
-*   **`CONFIG.sheets`**: Define the exact names of your source and target sheets. **Crucially, ensure these match your Google Sheet tab names.**
-*   **`CONFIG.headers`**: This is the most important section to maintain. If Amazon changes the column names in their reports, you *only* need to update the corresponding values here. For instance, if `seller-sku` becomes `merchant-sku` in your listing report, you would update `listingSku: 'seller-sku'` to `listingSku: 'merchant-sku'`.
-*   **`CONFIG.image.width`**: Adjust the width of the image column in pixels on the dashboard.
+*   **`CONFIG.sheets`**: Define the exact names of your source and target sheets. **Ensure these match your Google Sheet tab names perfectly.**
+*   **`CONFIG.headers`**: This is the most important section to maintain. If Amazon changes the column names in their reports, you *only* need to update the corresponding values here. For instance, if `seller-sku` becomes `merchant-sku`, you would update `listingSku: 'merchant-sku'`.
+*   **`CONFIG.image.width`**: Adjust the width of the image column in the generated dashboards.
 *   **`CONFIG.listingStatus`**: Confirm the exact strings used in your Amazon Listing Report's 'status' column for 'Active' and 'Inactive' listings.
 
 ## 5. Code Structure and Explanation
@@ -107,51 +140,43 @@ The script is organized into core functions and helper functions to ensure modul
 
 ### Core Functions (`Code.gs`)
 
-*   **`onOpen()`**: This special Google Apps Script function runs automatically when the spreadsheet is opened. It creates the "Dashboard Tools" custom menu and immediately opens the sidebar for user convenience.
-*   **`showSidebar()`**: Displays the `Sidebar.html` content as a custom sidebar within the Google Sheet interface.
-*   **`createConsolidatedDashboardFromSidebar(contextString, reportType)`**: This function acts as the primary entry point for interactions from the sidebar. It dispatches the request to the appropriate dashboard generation function based on the `reportType` parameter (`'all'`, `'inactive'`, `'active'`).
-*   **`generateAllListingsDashboard(contextString)`**, **`generateInactiveListingsDashboard(contextString)`**, **`generateActiveListingsDashboard(contextString)`**: These are wrapper functions that call the main `_generateDashboardReport` function with the specific `reportType` and target sheet name.
-*   **`_generateDashboardReport(contextString, reportType, targetSheetName)`**: This is the core logic function.
-    *   **Data Retrieval:** Fetches all data from the configured source sheets (`listing`, `inventory`, `sales`, `keepa`).
-    *   **Header Validation:** Performs initial checks to ensure critical headers are present in the source sheets, alerting the user if any are missing.
-    *   **Data Processing:** Utilizes helper functions (`processInventory`, `processSales`, `processKeepa`) to transform raw sheet data into easily queryable JavaScript objects (maps).
-    *   **Dashboard Data Construction:** Iterates through the listing data, enriching each row with corresponding inventory, sales, and Keepa image information. It dynamically generates `IMAGE()` and direct Amazon product `HYPERLINK()` formulas.
-    *   **Filtering and Sorting:** Applies the appropriate filtering (e.g., inactive FBA-SKUs) and sorting (e.g., active listings by Days of Supply) based on the `reportType`.
-    *   **Sheet Output:** Clears or creates the designated `targetSheetName`, writes the report title and headers, then populates the sheet with the processed dashboard data. It applies the image formulas specifically to the image column.
-    *   **Formatting:** Sets the image column width and auto-resizes other columns for optimal display.
-    *   **User Feedback:** Provides a success or error alert to the user.
+*   **`onOpen()`**: Runs automatically when the spreadsheet opens. It creates the "Dashboard Tools" menu and opens the sidebar.
+*   **`showSidebar()`**: Displays the `Sidebar.html` content.
+*   **`createConsolidatedDashboardFromSidebar(...)`**: The main router called by the sidebar. It validates the `reportType` and calls the appropriate generator function. It specifically blocks the `'analysis'` type, throwing an error.
+*   **`generate...Dashboard(...)`**: Wrapper functions that call the main `_generateDashboardReport` function with the correct `reportType` and target sheet name.
+*   **`_generateDashboardReport(...)`**: This is the core logic function.
+    *   **Data Retrieval & Validation:** Fetches data from the `listing`, `inventory`, and `keepa` sheets, throwing an error if required sheets or headers are missing.
+    *   **Data Processing:** Uses helper functions (`processInventory`, `processSales`, `processKeepa`) to transform raw data into SKU- and ASIN-based maps for efficient lookup.
+    *   **Dashboard Construction:** Iterates through each listing, enriching it with corresponding inventory, sales data, and Keepa image formulas.
+    *   **Filtering and Sorting:** Applies filtering (for active/inactive) and sorting (by Days of Supply for active) based on the `reportType`.
+    *   **Sheet Output:** Clears or creates the target sheet, writes headers, and populates the data.
+    *   **Formatting:** Sets column widths for better readability.
 
 ### Helper Functions (`Code.gs`)
 
-*   **`processInventory(data, ui)`**: Parses the `FBA_Inventory_Snapshot` data. It extracts 'available', 'days of supply', 'unfulfillable', and various 'reserved' quantities, mapping them by SKU for quick lookup. Includes robust header validation.
-*   **`processSales(data, ui)`**: Processes `FBA_Shipments_60_Days` data. It calculates 'yesterday\'s sales', 'current 30-day sales', and 'past 31-60 day sales' per SKU. It includes robust date parsing to handle various date formats from the report and performs header validation.
-*   **`processKeepa(data, ui)`**: Extracts ASINs and their corresponding image URLs from the `Keepa` sheet, mapping ASINs to image URLs. Includes header validation.
+*   **`processInventory(inventoryDataObject)`**: Parses the `FBA_Inventory_Snapshot` data. It extracts 'available', 'days of supply', 'unfulfillable', and 'reserved' quantities, mapping them by SKU.
+*   **`processSales(inventoryDataObject)`**: **This function now processes the `FBA_Inventory_Snapshot` data, not a separate sales report.** It extracts aggregated sales for the last 7, 30, and 60 days. It then calculates 'current 30-day sales' and 'past 31-60 day sales' for each SKU.
+*   **`processKeepa(keepaDataObject)`**: Extracts ASINs and their corresponding image URLs from the `Keepa` sheet.
+*   **`_getValidatedData(...)`**: A robust utility function that retrieves data from a sheet, validates that it's not empty, and confirms that all required headers are present.
+*   **`_handleError(...)`**: A centralized function for logging detailed errors and displaying user-friendly alerts in the UI.
 
 ### Sidebar HTML (`Sidebar.html`)
 
-This file defines the user interface that appears as a sidebar in Google Sheets. It includes:
-
-*   **Styling:** Embedded CSS for a clean, responsive, and modern look.
-*   **Input Field:** An optional text input for adding context to the generated dashboards.
-*   **Action Buttons:** Three distinct buttons to trigger the generation of 'All', 'Inactive', or 'Active' listings dashboards.
-*   **Loading Spinner:** A visual indicator shown while the script is processing.
-*   **Status Alert:** A dynamic message area to display success or error messages to the user.
-*   **Client-side JavaScript:** Handles user interactions (button clicks), retrieves input values, manages button states, displays the loading spinner, and communicates with the Google Apps Script functions on the server side using `google.script.run`.
+This file defines the UI in the sidebar. It uses a dropdown menu and a single "Generate" button. Its client-side JavaScript captures the user's selections and calls the main `createConsolidatedDashboardFromSidebar` function in `Code.gs` using `google.script.run`.
 
 ## 6. Troubleshooting and Common Issues
 
-*   **"Missing columns in..." Error:** This is the most common error. Double-check that:
-    *   Your source sheets (`All_Listing_Report`, `FBA_Inventory_Snapshot`, `FBA_Shipments_60_Days`, `Keepa`) exist and are spelled exactly as defined in `CONFIG.sheets`.
-    *   The column headers in your uploaded reports (e.g., `seller-sku`, `asin1`, `available`) exactly match the values defined in `CONFIG.headers`. Amazon sometimes changes these slightly, so verify against your latest downloaded reports.
-*   **"Generation Error: Invalid report type specified..."**: This indicates an internal issue with how the sidebar is calling the script or a mismatch in expected parameters. Ensure you haven't modified the `reportType` strings in `Sidebar.html` or `Code.gs`.
-*   **Script Authorization:** The first time you run the script, Google will ask for authorization to access your spreadsheet. Grant these permissions.
-*   **Slow Performance:** For very large datasets (tens of thousands of rows), the script might take some time to process. Google Apps Script has execution limits. If you encounter timeouts, consider processing smaller batches or optimizing your reports.
+*   **"Missing required columns in..." Error:** This is the most common error. Double-check that:
+    *   Your source sheets (`All_Listing_Report`, `FBA_Inventory_Snapshot`, `Keepa`) are named exactly as defined in `CONFIG.sheets`.
+    *   The column headers in your uploaded reports (e.g., `seller-sku`, `asin1`, `available`, `sales-shipped-last-30-days`) exactly match the values defined in `CONFIG.headers`. Verify against your latest downloaded reports.
+*   **"Analysis Tab cannot be generated..." Error:** This is expected behavior. If you select "General Analysis Tab" from the dropdown, this error will appear. The feature is disabled because the script no longer has access to the detailed transactional sales data it required.
+*   **Incorrect Sales Data:**
+    *   Confirm that the `FBA_Inventory_Snapshot` sheet is correctly populated.
+    *   Verify that the headers `sales-shipped-last-7-days`, `sales-shipped-last-30-days`, and `sales-shipped-last-60-days` exist in the sheet and in the `CONFIG.headers` object. The script relies entirely on these columns for all sales metrics.
 *   **Images Not Loading:**
     *   Ensure the `Keepa` sheet exists and contains `ASIN` and `Image` columns with valid public image URLs.
-    *   Verify the `ASIN` values in your `All_Listing_Report` match those in your `Keepa` sheet.
-*   **Incorrect Sales Data:**
-    *   Confirm the `FBA_Shipments_60_Days` sheet has correct `purchase-date` and `quantity` columns.
-    *   The script uses robust date parsing, but inconsistent date formats from Amazon reports can occasionally be an issue. Ensure your dates are in a standard format recognized by JavaScript's `Date` object.
+    *   Verify the `asin1` values in your `All_Listing_Report` match the `ASIN` values in your `Keepa` sheet.
+*   **Script Authorization:** The first time you run the script, Google will ask for authorization to access your spreadsheet. You must grant these permissions for the script to function.
 
 ## 7. Source Code
 
@@ -162,11 +187,10 @@ Below are the complete source code files for the Google Apps Script project.
 ```javascript
 /**
  * @OnlyCurrentDoc
- * This script creates consolidated Amazon dashboards and a professional analysis tab.
- * VERSION 14.1: Refined for enhanced error handling and robustness.
- * - Refined the global error handler to safely operate in any execution context (UI or background).
- * - Made the showSidebar function more resilient by ensuring a UI instance is always available.
- * - Maintained existing performance, robustness, and maintainability enhancements.
+ * This script creates consolidated Amazon dashboards.
+ * VERSION 15.1: Code Refinement.
+ * - Removed unused sheet references ('FBA_Shipments_60_Days', 'Reserved_Inventory_Snapshot') from the CONFIG object for clarity and maintainability.
+ * - Script logic remains focused on the new schema using 'FBA_Inventory_Snapshot' for both inventory and sales data.
  */
 
 // --- CONFIGURATION --- //
@@ -174,7 +198,6 @@ const CONFIG = {
   sheets: {
     listing: 'All_Listing_Report',
     inventory: 'FBA_Inventory_Snapshot',
-    sales: 'FBA_Shipments_60_Days',
     keepa: 'Keepa',
     dashboard: 'Dashboard',
     activeListings: 'Active_Listing',
@@ -183,17 +206,35 @@ const CONFIG = {
     chartData: '_AnalysisChartData' // Hidden sheet for chart source data
   },
   headers: {
-    listingSku: 'seller-sku', salesSku: 'sku', invSku: 'sku', asin: 'asin1',
-    itemName: 'item-name', status: 'status', available: 'available',
-    daysOfSupply: 'days-of-supply', unfulfillable: 'unfulfillable-quantity',
-    reservedCustomer: 'Reserved Customer Order', reservedTransfer: 'Reserved FC Transfer',
-    reservedProcessing: 'Reserved FC Processing', purchaseDate: 'purchase-date',
-    quantity: 'quantity', itemPrice: 'item-price', orderId: 'amazon-order-id',
-    keepaAsin: 'ASIN', keepaImage: 'Image'
+    // All_Listing_Report Headers
+    listingSku: 'seller-sku',
+    asin: 'asin1',
+    itemName: 'item-name',
+    status: 'status',
+
+    // FBA_Inventory_Snapshot Headers
+    invSku: 'sku',
+    available: 'available',
+    daysOfSupply: 'days-of-supply',
+    unfulfillable: 'unfulfillable-quantity',
+    reservedCustomer: 'Reserved Customer Order',
+    reservedTransfer: 'Reserved FC Transfer',
+    reservedProcessing: 'Reserved FC Processing',
+    salesT7: 'sales-shipped-last-7-days',
+    salesT30: 'sales-shipped-last-30-days',
+    salesT60: 'sales-shipped-last-60-days',
+
+    // Keepa Headers
+    keepaAsin: 'ASIN',
+    keepaImage: 'Image'
   },
-  image: { width: 100 },
-  listingStatus: { active: 'Active', inactive: 'Inactive' },
-  chartLimits: { topNProducts: 10 }
+  image: {
+    width: 100
+  },
+  listingStatus: {
+    active: 'Active',
+    inactive: 'Inactive'
+  }
 };
 // --- END CONFIGURATION ---
 
@@ -215,10 +256,6 @@ function onOpen() {
   }
 }
 
-// --- REFINEMENT ---
-// The `showSidebar` function has been updated to be more robust. It now ensures a UI 
-// instance exists, whether it's passed in as an argument or fetched directly. This prevents
-// errors if the function is ever called from a context that doesn't provide the `ui` object.
 /**
  * Displays the HTML sidebar for user interaction.
  * @param {GoogleAppsScript.Spreadsheet.Ui} [ui] The spreadsheet UI instance (optional).
@@ -256,7 +293,8 @@ function createConsolidatedDashboardFromSidebar(contextString, reportType) {
       case 'active':
         return generateActiveListingsDashboard(ss, ui, contextString);
       case 'analysis':
-        return generateAnalysisTab(ss, ui);
+        // This feature is disabled due to schema changes.
+        throw new Error('The Analysis Tab cannot be generated. The new data schema does not contain the required transactional sales data.');
       default:
         throw new Error('Invalid report type specified.');
     }
@@ -303,353 +341,6 @@ function generateActiveListingsDashboard(ss, ui, c) {
   return _generateDashboardReport(ss, ui, c, 'active', CONFIG.sheets.activeListings);
 }
 
-/**
- * Generates the professional 'Analysis' tab with KPIs and charts.
- * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
- * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
- * @returns {string} Success message.
- */
-function generateAnalysisTab(ss, ui) {
-  let analysisSheet = ss.getSheetByName(CONFIG.sheets.analysis);
-  if (analysisSheet) {
-    const charts = analysisSheet.getCharts();
-    charts.forEach(chart => analysisSheet.removeChart(chart));
-    analysisSheet.clear();
-  } else {
-    analysisSheet = ss.insertSheet(CONFIG.sheets.analysis);
-  }
-
-  let chartDataSheet = ss.getSheetByName(CONFIG.sheets.chartData);
-  if (chartDataSheet) {
-    chartDataSheet.clear();
-  } else {
-    chartDataSheet = ss.insertSheet(CONFIG.sheets.chartData);
-    chartDataSheet.hideSheet();
-  }
-
-  const salesDataObject = _getValidatedData(ss, CONFIG.sheets.sales, [CONFIG.headers.purchaseDate, CONFIG.headers.quantity, CONFIG.headers.itemPrice, CONFIG.headers.orderId, CONFIG.headers.salesSku]);
-  const listingDataObject = _getValidatedData(ss, CONFIG.sheets.listing, [CONFIG.headers.listingSku, CONFIG.headers.itemName]);
-
-  const weeklySales = _processWeeklySalesData(salesDataObject);
-  const marketShareData = _processMarketShareData(salesDataObject, listingDataObject);
-  const topNSalesData = _processTopNSalesData(salesDataObject, listingDataObject);
-
-  _createProfessionalLayout(analysisSheet, weeklySales);
-  _createSalesTrendChart(analysisSheet, chartDataSheet, weeklySales);
-  _createMarketShareChart(analysisSheet, chartDataSheet, marketShareData);
-  _createTopNSalesChart(analysisSheet, chartDataSheet, topNSalesData);
-
-  analysisSheet.setColumnWidths(1, 12, 110).setFrozenRows(1);
-  ss.setActiveSheet(analysisSheet);
-
-  return `The professional "${CONFIG.sheets.analysis}" tab has been generated.`;
-}
-
-// --- ANALYSIS TAB HELPERS --- //
-
-/**
- * Creates the formatted layout with KPI cards and titles.
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target sheet.
- * @param {object} sales Processed weekly sales data including KPIs.
- */
-function _createProfessionalLayout(sheet, sales) {
-  sheet.getRange('A1:L1').merge().setValue('Amazon Sales Performance Dashboard').setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
-  sheet.getRange('A1:L1').setBackground('#2c3e50').setFontColor('white');
-
-  const now = new Date();
-  sheet.getRange('A2').setValue(`Last Updated: ${now.toLocaleString()}`).setFontSize(9).setFontColor('#7f8c8d');
-  sheet.getRange('A2:L2').merge().setHorizontalAlignment('right');
-
-  sheet.getRange('B4:E4').merge().setValue('Key Performance Indicators (Last 7 Days)').setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('B4:E11').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
-
-  const kpiLabels = ['Total Sales Revenue:', 'Total Units Sold:', 'Total Orders:', 'Average Order Value:', 'Average Units Per Order:'];
-  const kpiValues = [sales.weekTotalSales, sales.weekTotalUnits, sales.weekTotalOrders, sales.avgOrderValue, sales.avgUnitsPerOrder];
-  const kpiStartRow = 6;
-  kpiLabels.forEach((label, i) => {
-    sheet.getRange(`C${kpiStartRow + i}`).setValue(label).setFontWeight('bold').setHorizontalAlignment('right');
-    sheet.getRange(`D${kpiStartRow + i}`).setValue(kpiValues[i]).setFontSize(14).setFontWeight('bold').setHorizontalAlignment('right');
-  });
-
-  sheet.getRange(`D${kpiStartRow}`).setNumberFormat('$#,##0.00');
-  sheet.getRange(`D${kpiStartRow + 1}`).setNumberFormat('#,##0');
-  sheet.getRange(`D${kpiStartRow + 2}`).setNumberFormat('#,##0');
-  sheet.getRange(`D${kpiStartRow + 3}`).setNumberFormat('$#,##0.00');
-  sheet.getRange(`D${kpiStartRow + 4}`).setNumberFormat('#,##0.00');
-
-  sheet.getRange('F4:L4').merge().setValue('Daily Sales Trend (Last 7 Days)').setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('F4:L16').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
-
-  sheet.getRange('B18:E18').merge().setValue('Product Market Share (by Sales Revenue)').setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('B18:E36').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
-
-  sheet.getRange('F18:L18').merge().setValue(`Top ${CONFIG.chartLimits.topNProducts} Selling Products (Last 60 Days)`).setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('F18:L36').setBorder(true, true, true, true, true, true).setBackground('#ecf0f1');
-
-  sheet.getRange('A1:L36').setVerticalAlignment('middle');
-  sheet.getRange('B4:L36').setFontSize(10);
-}
-
-/**
- * Creates and inserts the daily sales trend line chart.
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target display sheet.
- * @param {GoogleAppsScript.Spreadsheet.Sheet} dataSheet The sheet to store chart data.
- * @param {object} sales Processed weekly sales data.
- */
-function _createSalesTrendChart(sheet, dataSheet, sales) {
-  const chartData = [['Date', 'Units Ordered', 'Ordered Product Sales']];
-  const sortedDates = Object.keys(sales.daily).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-
-  sortedDates.forEach(date => {
-    const data = sales.daily[date];
-    chartData.push([new Date(date), data.units, data.sales]);
-  });
-
-  if (chartData.length < 2) {
-    sheet.getRange('F5').setValue('Not enough sales trend data to generate chart.').setFontStyle('italic').setHorizontalAlignment('center');
-    sheet.getRange('F5:L5').merge();
-    return;
-  }
-
-  const chartDataRange = dataSheet.getRange(1, 1, chartData.length, chartData[0].length);
-  chartDataRange.setValues(chartData);
-
-  const lineChart = sheet.newChart()
-    .setChartType(Charts.ChartType.LINE)
-    .addRange(chartDataRange)
-    .setPosition(5, 6, 0, 0)
-    .setOption('title', null)
-    .setOption('legend', { position: 'top', textStyle: { fontSize: 10 } })
-    .setOption('hAxis', { title: 'Date', format: 'M/d', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 } })
-    .setOption('vAxes', {
-      0: { title: 'Units Ordered', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 }, format: '#,##0' },
-      1: { title: 'Product Sales', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 }, format: '$#,##0.00' }
-    })
-    .setOption('series', {
-      0: { targetAxisIndex: 0, color: '#3498db', type: 'bars' },
-      1: { targetAxisIndex: 1, color: '#e74c3c', type: 'line', lineWidth: 2, pointSize: 4 }
-    })
-    .setOption('chartArea', { left: '15%', top: '15%', width: '70%', height: '70%' })
-    .setOption('focusTarget', 'category')
-    .build();
-
-  sheet.insertChart(lineChart);
-}
-
-/**
- * Creates and inserts the product market share treemap chart.
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target display sheet.
- * @param {GoogleAppsScript.Spreadsheet.Sheet} dataSheet The sheet to store chart data.
- * @param {Array<Array<any>>} marketShareData Processed market share data.
- */
-function _createMarketShareChart(sheet, dataSheet, marketShareData) {
-  if (marketShareData.length < 3) {
-    sheet.getRange('B19').setValue('Not enough sales data to generate market share chart.').setFontStyle('italic').setHorizontalAlignment('center');
-    sheet.getRange('B19:E19').merge();
-    return;
-  }
-
-  const chartDataRange = dataSheet.getRange(1, 6, marketShareData.length, marketShareData[0].length);
-  chartDataRange.setValues(marketShareData);
-
-  const treemapChart = sheet.newChart()
-    .setChartType(Charts.ChartType.TREEMAP)
-    .addRange(chartDataRange)
-    .setPosition(19, 2, 0, 0)
-    .setOption('title', null)
-    .setOption('minColor', '#e6f4ea')
-    .setOption('midColor', '#87c5a4')
-    .setOption('maxColor', '#225c4e')
-    .setOption('headerHeight', 15)
-    .setOption('fontColor', 'black')
-    .setOption('showScale', true)
-    .setOption('generateTooltip', true)
-    .setOption('chartArea', { left: '5%', top: '10%', width: '90%', height: '85%' })
-    .build();
-
-  sheet.insertChart(treemapChart);
-}
-
-/**
- * Creates and inserts the top N selling products bar chart.
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The target display sheet.
- * @param {GoogleAppsScript.Spreadsheet.Sheet} dataSheet The sheet to store chart data.
- * @param {Array<Array<any>>} topNSalesData Processed top N sales data.
- */
-function _createTopNSalesChart(sheet, dataSheet, topNSalesData) {
-  if (topNSalesData.length < 2) {
-    sheet.getRange('F19').setValue(`Not enough sales data to generate top ${CONFIG.chartLimits.topNProducts} products chart.`).setFontStyle('italic').setHorizontalAlignment('center');
-    sheet.getRange('F19:L19').merge();
-    return;
-  }
-
-  const chartDataRange = dataSheet.getRange(1, 10, topNSalesData.length, topNSalesData[0].length);
-  chartDataRange.setValues(topNSalesData);
-
-  const barChart = sheet.newChart()
-    .setChartType(Charts.ChartType.BAR)
-    .addRange(chartDataRange)
-    .setPosition(19, 6, 0, 0)
-    .setOption('title', null)
-    .setOption('legend', { position: 'none' })
-    .setOption('hAxis', { title: 'Sales Revenue', format: '$#,##0.00', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 } })
-    .setOption('vAxis', { title: 'Product Name', textStyle: { fontSize: 9 }, titleTextStyle: { fontSize: 10 } })
-    .setOption('series', { 0: { color: '#2ecc71' } })
-    .setOption('chartArea', { left: '25%', top: '10%', width: '70%', height: '80%' })
-    .build();
-
-  sheet.insertChart(barChart);
-}
-
-/**
- * Processes sales data for weekly trends and KPIs.
- * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
- * @returns {object} Processed sales data including KPIs.
- */
-function _processWeeklySalesData(salesDataObject) {
-  const { headers, data } = salesDataObject;
-  const dateIdx = headers.indexOf(CONFIG.headers.purchaseDate);
-  const qtyIdx = headers.indexOf(CONFIG.headers.quantity);
-  const priceIdx = headers.indexOf(CONFIG.headers.itemPrice);
-  const orderIdIdx = headers.indexOf(CONFIG.headers.orderId);
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(today.getDate() - 7);
-
-  const weeklyData = {};
-  const weeklyOrderIds = new Set();
-
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    weeklyData[d.toLocaleDateString()] = { units: 0, sales: 0 };
-  }
-
-  data.forEach(row => {
-    const purchaseDate = new Date(row[dateIdx]);
-    if (!isNaN(purchaseDate.getTime()) && purchaseDate >= sevenDaysAgo && purchaseDate <= today) {
-      const key = purchaseDate.toLocaleDateString();
-      if (key in weeklyData) {
-        const quantity = parseFloat(row[qtyIdx]) || 0;
-        const price = parseFloat(row[priceIdx]) || 0;
-        weeklyData[key].units += quantity;
-        weeklyData[key].sales += quantity * price;
-        weeklyOrderIds.add(row[orderIdIdx]);
-      }
-    }
-  });
-
-  const weekTotalOrders = weeklyOrderIds.size;
-  const weekTotalUnits = Object.values(weeklyData).reduce((sum, day) => sum + day.units, 0);
-  const weekTotalSales = Object.values(weeklyData).reduce((sum, day) => sum + day.sales, 0);
-  const avgOrderValue = weekTotalOrders > 0 ? (weekTotalSales / weekTotalOrders) : 0;
-  const avgUnitsPerOrder = weekTotalOrders > 0 ? (weekTotalUnits / weekTotalOrders) : 0;
-
-  return { daily: weeklyData, weekTotalOrders, weekTotalUnits, weekTotalSales, avgOrderValue, avgUnitsPerOrder };
-}
-
-/**
- * Helper to process market share data (for Treemap chart).
- * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
- * @param {{headers: string[], data: any[][]}} listingDataObject The validated listing data object.
- * @returns {Array<Array<any>>} Formatted data for treemap chart.
- */
-function _processMarketShareData(salesDataObject, listingDataObject) {
-  const { headers: salesHeaders, data: salesData } = salesDataObject;
-  const salesSkuIdx = salesHeaders.indexOf(CONFIG.headers.salesSku);
-  const salesQtyIdx = salesHeaders.indexOf(CONFIG.headers.quantity);
-  const salesPriceIdx = salesHeaders.indexOf(CONFIG.headers.itemPrice);
-
-  const salesBySku = {};
-  salesData.forEach(row => {
-    const sku = String(row[salesSkuIdx] || '').trim();
-    if (sku) {
-      const quantity = parseFloat(row[salesQtyIdx]) || 0;
-      const price = parseFloat(row[salesPriceIdx]) || 0;
-      salesBySku[sku] = (salesBySku[sku] || 0) + (quantity * price);
-    }
-  });
-
-  const skuToNameMap = {};
-  if (listingDataObject && listingDataObject.data.length > 0) {
-    const { headers: listingHeaders, data: listingData } = listingDataObject;
-    const listingSkuIdx = listingHeaders.indexOf(CONFIG.headers.listingSku);
-    const listingNameIdx = listingHeaders.indexOf(CONFIG.headers.itemName);
-    listingData.forEach(row => {
-      const sku = String(row[listingSkuIdx] || '').trim();
-      const name = String(row[listingNameIdx] || '').trim();
-      if (sku && name) skuToNameMap[sku] = name;
-    });
-  } else {
-    Logger.log(`Warning: Listing report sheet "${CONFIG.sheets.listing}" is empty or has no data, using SKUs for product names.`);
-  }
-
-  const treemapData = [['Product', 'Parent', 'Sales Revenue']];
-  treemapData.push(['All Products', null, 0]);
-
-  for (const [sku, totalRevenue] of Object.entries(salesBySku)) {
-    if (totalRevenue > 0) {
-      treemapData.push([skuToNameMap[sku] || sku, 'All Products', totalRevenue]);
-    }
-  }
-  return treemapData;
-}
-
-/**
- * Helper to process sales data for top N selling products.
- * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
- * @param {{headers: string[], data: any[][]}} listingDataObject The validated listing data object.
- * @returns {Array<Array<any>>} Formatted data for bar chart.
- */
-function _processTopNSalesData(salesDataObject, listingDataObject) {
-  const { headers: salesHeaders, data: salesData } = salesDataObject;
-  const salesSkuIdx = salesHeaders.indexOf(CONFIG.headers.salesSku);
-  const salesQtyIdx = salesHeaders.indexOf(CONFIG.headers.quantity);
-  const salesPriceIdx = salesHeaders.indexOf(CONFIG.headers.itemPrice);
-  const salesDateIdx = salesHeaders.indexOf(CONFIG.headers.purchaseDate);
-
-  const salesBySku = {};
-  const sixtyDaysAgo = new Date();
-  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-  sixtyDaysAgo.setHours(0, 0, 0, 0);
-
-  salesData.forEach(row => {
-    const purchaseDate = new Date(row[salesDateIdx]);
-    if (!isNaN(purchaseDate.getTime()) && purchaseDate >= sixtyDaysAgo) {
-      const sku = String(row[salesSkuIdx] || '').trim();
-      if (sku) {
-        const quantity = parseFloat(row[salesQtyIdx]) || 0;
-        const price = parseFloat(row[salesPriceIdx]) || 0;
-        salesBySku[sku] = (salesBySku[sku] || 0) + (quantity * price);
-      }
-    }
-  });
-
-  const skuToNameMap = {};
-  if (listingDataObject && listingDataObject.data.length > 0) {
-    const { headers: listingHeaders, data: listingData } = listingDataObject;
-    const listingSkuIdx = listingHeaders.indexOf(CONFIG.headers.listingSku);
-    const listingNameIdx = listingHeaders.indexOf(CONFIG.headers.itemName);
-    listingData.forEach(row => {
-      const sku = String(row[listingSkuIdx] || '').trim();
-      const name = String(row[listingNameIdx] || '').trim();
-      if (sku && name) skuToNameMap[sku] = name;
-    });
-  }
-
-  const sortedProducts = Object.entries(salesBySku)
-    .map(([sku, revenue]) => ({ name: skuToNameMap[sku] || sku, revenue: revenue }))
-    .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, CONFIG.chartLimits.topNProducts);
-
-  const chartData = [['Product', 'Sales Revenue']];
-  sortedProducts.forEach(p => chartData.push([p.name, p.revenue]));
-
-  return chartData;
-}
-
 // --- CORE DASHBOARD & HELPER FUNCTIONS --- //
 
 /**
@@ -662,16 +353,24 @@ function _processTopNSalesData(salesDataObject, listingDataObject) {
  * @returns {string} Success message.
  */
 function _generateDashboardReport(ss, ui, contextString = '', reportType = 'all', targetSheetName) {
+  // Fetch all necessary data.
   const listingDataObject = _getValidatedData(ss, CONFIG.sheets.listing, [CONFIG.headers.listingSku, CONFIG.headers.asin, CONFIG.headers.itemName, CONFIG.headers.status]);
-  const inventoryDataObject = _getValidatedData(ss, CONFIG.sheets.inventory, [CONFIG.headers.invSku, CONFIG.headers.available, CONFIG.headers.daysOfSupply, CONFIG.headers.unfulfillable, CONFIG.headers.reservedCustomer, CONFIG.headers.reservedTransfer, CONFIG.headers.reservedProcessing]);
-  const salesDataObject = _getValidatedData(ss, CONFIG.sheets.sales, [CONFIG.headers.salesSku, CONFIG.headers.purchaseDate, CONFIG.headers.quantity]);
+  const inventoryDataObject = _getValidatedData(ss, CONFIG.sheets.inventory, [
+    CONFIG.headers.invSku, CONFIG.headers.available, CONFIG.headers.daysOfSupply, CONFIG.headers.unfulfillable,
+    CONFIG.headers.reservedCustomer, CONFIG.headers.reservedTransfer, CONFIG.headers.reservedProcessing,
+    CONFIG.headers.salesT7, CONFIG.headers.salesT30, CONFIG.headers.salesT60
+  ]);
   const keepaDataObject = _getValidatedData(ss, CONFIG.sheets.keepa, [CONFIG.headers.keepaAsin, CONFIG.headers.keepaImage]);
 
+  // Process data into maps for easy lookup
   const inventoryMap = processInventory(inventoryDataObject);
-  const salesMap = processSales(salesDataObject);
+  const salesMap = processSales(inventoryDataObject); // Pass inventory data to new processSales
   const keepaMap = processKeepa(keepaDataObject);
 
-  const { headers: listingHeaders, data: listingData } = listingDataObject;
+  const {
+    headers: listingHeaders,
+    data: listingData
+  } = listingDataObject;
   const skuListingIndex = listingHeaders.indexOf(CONFIG.headers.listingSku);
   const asinListingIndex = listingHeaders.indexOf(CONFIG.headers.asin);
   const nameListingIndex = listingHeaders.indexOf(CONFIG.headers.itemName);
@@ -697,15 +396,13 @@ function _generateDashboardReport(ss, ui, contextString = '', reportType = 'all'
       amazonLink = `https://www.amazon.com/dp/${asin}`;
     }
 
-    const pastMonthSales = sales.pastMonthSales || 0;
-    const currentMonthSales = sales.currentMonthSales || 0;
-
     allDashboardData.push([
       imageFormula, row[nameListingIndex] || 'N/A', asin || 'N/A', sku, amazonLink,
-      row[statusListingIndex] || 'N/A', sales.yesterdaySales || 0, inventory.available || 0,
+      row[statusListingIndex] || 'N/A', sales.salesLast7Days || 0, inventory.available || 0,
       inventory.daysOfSupply || 0, inventory.reservedCustomerOrder || 0,
       inventory.reservedFcTransfer || 0, inventory.reservedFcProcessing || 0,
-      inventory.unfulfillable || 0, pastMonthSales, currentMonthSales, currentMonthSales - pastMonthSales
+      inventory.unfulfillable || 0, sales.pastMonthSales || 0, sales.currentMonthSales || 0,
+      (sales.currentMonthSales || 0) - (sales.pastMonthSales || 0)
     ]);
   });
 
@@ -732,7 +429,7 @@ function _generateDashboardReport(ss, ui, contextString = '', reportType = 'all'
     targetSheet = ss.insertSheet(targetSheetName);
   }
 
-  const dashboardHeaders = ['Image', 'Name', 'Asin', 'SKU', 'Amazon Link', 'Listing status', "Yesterday's Sales", 'Available', 'Days of Supply', 'Customer Orders', 'FC Transfers', 'FC Processing', 'Unfulfillable', 'Past 31-60 Day Sales', 'Current 30 Day Sales', 'Monthly Difference'];
+  const dashboardHeaders = ['Image', 'Name', 'Asin', 'SKU', 'Amazon Link', 'Listing status', "Sales Last 7 Days", 'Available', 'Days of Supply', 'Customer Orders', 'FC Transfers', 'FC Processing', 'Unfulfillable', 'Past 31-60 Day Sales', 'Current 30 Day Sales', 'Monthly Difference'];
   let startRow = 1;
 
   if (contextString) {
@@ -767,7 +464,10 @@ function _generateDashboardReport(ss, ui, contextString = '', reportType = 'all'
  */
 function processInventory(inventoryDataObject) {
   const map = {};
-  const { headers, data } = inventoryDataObject;
+  const {
+    headers,
+    data
+  } = inventoryDataObject;
   const skuIndex = headers.indexOf(CONFIG.headers.invSku);
   const availableIndex = headers.indexOf(CONFIG.headers.available);
   const daysOfSupplyIndex = headers.indexOf(CONFIG.headers.daysOfSupply);
@@ -793,35 +493,36 @@ function processInventory(inventoryDataObject) {
 }
 
 /**
- * Processes sales data into a SKU-based map for daily, current month, and past month sales.
- * @param {{headers: string[], data: any[][]}} salesDataObject The validated sales data object.
+ * Processes aggregated sales data from the inventory report into a SKU-based map.
+ * @param {{headers: string[], data: any[][]}} inventoryDataObject The validated inventory data object.
  * @returns {object} A map with SKU as key and sales details as value.
  */
-function processSales(salesDataObject) {
+function processSales(inventoryDataObject) {
   const map = {};
-  const { headers, data } = salesDataObject;
-  const skuIndex = headers.indexOf(CONFIG.headers.salesSku);
-  const purchaseDateIndex = headers.indexOf(CONFIG.headers.purchaseDate);
-  const quantityIndex = headers.indexOf(CONFIG.headers.quantity);
-
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const yesterdayStart = new Date(todayStart);
-  yesterdayStart.setDate(todayStart.getDate() - 1);
-  const thirtyDaysAgo = new Date(todayStart);
-  thirtyDaysAgo.setDate(todayStart.getDate() - 30);
-  const sixtyDaysAgo = new Date(todayStart);
-  sixtyDaysAgo.setDate(todayStart.getDate() - 60);
+  const {
+    headers,
+    data
+  } = inventoryDataObject;
+  const skuIndex = headers.indexOf(CONFIG.headers.invSku);
+  const salesT7Index = headers.indexOf(CONFIG.headers.salesT7);
+  const salesT30Index = headers.indexOf(CONFIG.headers.salesT30);
+  const salesT60Index = headers.indexOf(CONFIG.headers.salesT60);
 
   data.forEach(row => {
     const sku = String(row[skuIndex]).trim();
-    const purchaseDate = new Date(row[purchaseDateIndex]);
-    const quantity = parseInt(row[quantityIndex], 10);
-    if (sku && !isNaN(quantity) && !isNaN(purchaseDate.getTime())) {
-      if (!map[sku]) map[sku] = { yesterdaySales: 0, currentMonthSales: 0, pastMonthSales: 0 };
-      if (purchaseDate >= yesterdayStart && purchaseDate < todayStart) map[sku].yesterdaySales += quantity;
-      if (purchaseDate >= thirtyDaysAgo && purchaseDate < todayStart) map[sku].currentMonthSales += quantity;
-      if (purchaseDate >= sixtyDaysAgo && purchaseDate < thirtyDaysAgo) map[sku].pastMonthSales += quantity;
+    if (sku) {
+      const salesT7 = parseInt(row[salesT7Index], 10) || 0;
+      const salesT30 = parseInt(row[salesT30Index], 10) || 0;
+      const salesT60 = parseInt(row[salesT60Index], 10) || 0;
+
+      // Calculate sales for the 31-60 day period.
+      const pastMonthSales = salesT60 - salesT30;
+
+      map[sku] = {
+        salesLast7Days: salesT7,
+        currentMonthSales: salesT30,
+        pastMonthSales: pastMonthSales < 0 ? 0 : pastMonthSales // Ensure non-negative
+      };
     }
   });
   return map;
@@ -834,7 +535,10 @@ function processSales(salesDataObject) {
  */
 function processKeepa(keepaDataObject) {
   const map = {};
-  const { headers, data } = keepaDataObject;
+  const {
+    headers,
+    data
+  } = keepaDataObject;
   const asinIndex = headers.indexOf(CONFIG.headers.keepaAsin);
   const imageIndex = headers.indexOf(CONFIG.headers.keepaImage);
 
@@ -848,10 +552,6 @@ function processKeepa(keepaDataObject) {
 
 // --- UTILITY FUNCTIONS --- //
 
-// --- REFINEMENT ---
-// The error handler is updated to prevent the "Cannot read properties of undefined (reading 'alert')"
-// error. It now checks if a UI context is available before attempting to show a UI alert.
-// It will always log the full error for debugging, regardless of the context.
 /**
  * A centralized error handler. Logs the error and shows a user-friendly alert if in a UI context.
  * @param {Error} e The error object that was caught.
@@ -882,10 +582,14 @@ function _handleError(e, ui, functionName = 'unknown') {
 function _getValidatedData(ss, sheetName, requiredHeaders) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error(`Required sheet "${sheetName}" not found.`);
-  
+
   const data = sheet.getDataRange().getValues();
-  if (data.length < 1) throw new Error(`Sheet "${sheetName}" is empty.`);
-  
+  if (data.length < 2) { // Needs at least a header row and one data row
+      Logger.log(`Warning: Sheet "${sheetName}" is empty or contains only headers.`);
+      // Return empty data structure but with valid headers to prevent downstream errors
+      return { headers: (data[0] || []).map(h => String(h).trim()), data: [] };
+  }
+
   const headers = data[0].map(h => String(h).trim());
   const headerSet = new Set(headers);
   const missingHeaders = requiredHeaders.filter(h => !headerSet.has(h));
@@ -894,7 +598,10 @@ function _getValidatedData(ss, sheetName, requiredHeaders) {
     throw new Error(`Missing required columns in "${sheetName}": ${missingHeaders.join(', ')}`);
   }
 
-  return { headers: headers, data: data.slice(1) };
+  return {
+    headers: headers,
+    data: data.slice(1)
+  };
 }
 ```
 
