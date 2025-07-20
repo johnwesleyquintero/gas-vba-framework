@@ -757,6 +757,24 @@ function _getValidatedData(ss, sheetName, requiredHeaders) {
         }
         .alert-success { background-color: #28a745; }
         .alert-error { background-color: #dc3545; }
+
+        /* --- NEW FOOTER STYLES --- */
+        .footer {
+            text-align: center;
+            margin-top: 10px; /* Adjusted margin for better spacing */
+            padding-top: 15px; /* Added padding top */
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .footer a {
+            font-size: 0.9em;
+            color: #007bff; /* Standard link blue for visibility */
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -773,11 +791,11 @@ function _getValidatedData(ss, sheetName, requiredHeaders) {
             <input type="text" id="contextInput" placeholder="e.g., Q2 Inventory Review">
         </div>
 
-        <!-- NEW: Dropdown for selecting report type -->
+        <!-- Dropdown for selecting report type -->
         <div class="form-group">
             <label for="reportTypeSelect">Analysis Type</label>
             <select id="reportTypeSelect">
-                <!-- 'analysis' is the value for the original primary button -->
+                <!-- 'analysis' is the value for the disabled feature -->
                 <option value="analysis">General Analysis Tab</option>
                 <option value="all">All Listings Dashboard</option>
                 <option value="inactive">Inactive Listings (FBA-SKU)</option>
@@ -785,17 +803,18 @@ function _getValidatedData(ss, sheetName, requiredHeaders) {
             </select>
         </div>
 
-        <!-- NEW: Single, consolidated button -->
+        <!-- Single, consolidated button -->
         <button id="generateBtn" onclick="runReport()">Generate</button>
 
         <div id="loadingSpinner" class="spinner" style="display:none;"></div>
+
+        <!-- --- NEW FOOTER ELEMENT WITH DOCUMENTATION LINK --- -->
+        <div class="footer">
+            <a href="https://github.com/johnwesleyquintero/gas-framework/blob/main/inventory-report.md" target="_blank">How to use this tool?</a>
+        </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // No changes needed here
-        });
-
         // MODIFIED: The function no longer needs a parameter
         function runReport() {
             // GETTING VALUES: Now we get the report type from the dropdown
