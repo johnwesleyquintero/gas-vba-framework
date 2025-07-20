@@ -188,8 +188,9 @@ Below are the complete source code files for the Google Apps Script project.
 /**
  * @OnlyCurrentDoc
  * This script creates consolidated Amazon dashboards.
- * VERSION 15.1: Code Refinement.
- * - Removed unused sheet references ('FBA_Shipments_60_Days', 'Reserved_Inventory_Snapshot') from the CONFIG object for clarity and maintainability.
+ * VERSION 15.2: Authorization and UI Refinement.
+ * - Fixed a permissions error by modifying the onOpen() trigger. The sidebar now opens only when the user clicks the menu item, which is a more robust authorization pattern.
+ * - Removed unused 'analysis' and 'chartData' references from the CONFIG object for better clarity.
  * - Script logic remains focused on the new schema using 'FBA_Inventory_Snapshot' for both inventory and sales data.
  */
 
@@ -201,9 +202,7 @@ const CONFIG = {
     keepa: 'Keepa',
     dashboard: 'Dashboard',
     activeListings: 'Active_Listing',
-    inactiveListings: 'Inactive_Listing',
-    analysis: 'Analysis',
-    chartData: '_AnalysisChartData' // Hidden sheet for chart source data
+    inactiveListings: 'Inactive_Listing'
   },
   headers: {
     // All_Listing_Report Headers
@@ -242,33 +241,35 @@ const CONFIG = {
 
 /**
  * Adds a custom menu to the spreadsheet UI when the file is opened.
- * Also displays the HTML sidebar.
+ * Note: A simple onOpen() trigger runs in a restricted mode and cannot perform actions
+ * that require authorization, like showing a sidebar. The sidebar is now opened
+ * by the user via the menu item to ensure proper permissions are handled.
  */
 function onOpen() {
-  const ui = SpreadsheetApp.getUi(); // Get UI once here
+  const ui = SpreadsheetApp.getUi();
   try {
     ui.createMenu('Dashboard Tools')
       .addItem('Open Dashboard Controls', 'showSidebar')
       .addToUi();
-    showSidebar(ui); // Pass UI instance to avoid an extra API call
   } catch (e) {
-    _handleError(e, ui, 'onOpen');
+    // Use a simple log here as UI alerts may not work in all onOpen contexts.
+    Logger.log(`Error creating custom menu: ${e.message}`);
   }
 }
 
 /**
  * Displays the HTML sidebar for user interaction.
- * @param {GoogleAppsScript.Spreadsheet.Ui} [ui] The spreadsheet UI instance (optional).
+ * This function is called by the user from the custom menu.
  */
-function showSidebar(ui) {
-  const effectiveUi = ui || SpreadsheetApp.getUi();
+function showSidebar() {
+  const ui = SpreadsheetApp.getUi();
   try {
     const html = HtmlService.createHtmlOutputFromFile('Sidebar')
       .setTitle('Dashboard Controls')
       .setWidth(300);
-    effectiveUi.showSidebar(html);
+    ui.showSidebar(html);
   } catch (e) {
-    _handleError(e, effectiveUi, 'showSidebar');
+    _handleError(e, ui, 'showSidebar');
   }
 }
 
@@ -309,7 +310,7 @@ function createConsolidatedDashboardFromSidebar(contextString, reportType) {
 // --- DASHBOARD GENERATORS --- //
 
 /**
- * Generates the 'All_Listing_Report' dashboard.
+ * Generates the 'All Listings' dashboard.
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
  * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
  * @param {string} c User-provided context string.
@@ -320,7 +321,7 @@ function generateAllListingsDashboard(ss, ui, c) {
 }
 
 /**
- * Generates the 'Inactive_Listing' dashboard.
+ * Generates the 'Inactive Listings' dashboard.
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
  * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
  * @param {string} c User-provided context string.
@@ -331,7 +332,7 @@ function generateInactiveListingsDashboard(ss, ui, c) {
 }
 
 /**
- * Generates the 'Active_Listing' dashboard.
+ * Generates the 'Active Listings' dashboard.
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss The active spreadsheet instance.
  * @param {GoogleAppsScript.Spreadsheet.Ui} ui The spreadsheet UI instance.
  * @param {string} c User-provided context string.
@@ -364,7 +365,7 @@ function _generateDashboardReport(ss, ui, contextString = '', reportType = 'all'
 
   // Process data into maps for easy lookup
   const inventoryMap = processInventory(inventoryDataObject);
-  const salesMap = processSales(inventoryDataObject); // Pass inventory data to new processSales
+  const salesMap = processSales(inventoryDataObject);
   const keepaMap = processKeepa(keepaDataObject);
 
   const {
